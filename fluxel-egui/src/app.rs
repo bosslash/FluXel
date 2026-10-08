@@ -5,7 +5,7 @@ use eframe::egui::{
 };
 use global_hotkey::{
     GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
-    hotkey::{Code, HotKey, Modifiers},
+    hotkey::{CMD_OR_CTRL, Code, HotKey, Modifiers},
 };
 
 use fluxel_egui::{
@@ -45,6 +45,11 @@ enum FocusTarget {
     GanttTitle,
     SearchQuery,
 }
+
+#[cfg(target_os = "macos")]
+const PRIMARY_KEY_LABEL: &str = "⌘";
+#[cfg(not(target_os = "macos"))]
+const PRIMARY_KEY_LABEL: &str = "Ctrl+";
 
 pub struct FluxelApp {
     storage: Storage,
@@ -221,14 +226,14 @@ impl FluxelApp {
     }
 
     fn keyboard_shortcuts(&mut self, ctx: &egui::Context) {
-        let (ctrl, shift, alt) = ctx.input(|input| {
+        let (primary, shift, alt) = ctx.input(|input| {
             (
-                input.modifiers.ctrl || input.modifiers.command,
+                input.modifiers.command,
                 input.modifiers.shift,
                 input.modifiers.alt,
             )
         });
-        if ctrl && !shift && !alt {
+        if primary && !shift && !alt {
             if ctx.input(|input| input.key_pressed(Key::K)) {
                 self.select_page(Page::Kanban);
             } else if ctx.input(|input| input.key_pressed(Key::P)) {
@@ -252,13 +257,13 @@ impl FluxelApp {
             self.pending_focus = Some(FocusTarget::QuickSearch);
         }
         if self.page == Page::Kanban && self.task_editor.is_none() && !self.search_open {
-            if ctrl && ctx.input(|input| input.key_pressed(Key::ArrowLeft)) {
+            if primary && ctx.input(|input| input.key_pressed(Key::ArrowLeft)) {
                 self.move_selected_status(-1);
-            } else if ctrl && ctx.input(|input| input.key_pressed(Key::ArrowRight)) {
+            } else if primary && ctx.input(|input| input.key_pressed(Key::ArrowRight)) {
                 self.move_selected_status(1);
-            } else if !ctrl && ctx.input(|input| input.key_pressed(Key::ArrowUp)) {
+            } else if !primary && ctx.input(|input| input.key_pressed(Key::ArrowUp)) {
                 self.move_task_selection(-1);
-            } else if !ctrl && ctx.input(|input| input.key_pressed(Key::ArrowDown)) {
+            } else if !primary && ctx.input(|input| input.key_pressed(Key::ArrowDown)) {
                 self.move_task_selection(1);
             } else if ctx.input(|input| input.key_pressed(Key::Enter)) {
                 self.open_selected_task();
@@ -341,7 +346,7 @@ impl FluxelApp {
                         }
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("検索  Ctrl+F").clicked() {
+                        if ui.button(format!("検索  {PRIMARY_KEY_LABEL}F")).clicked() {
                             self.open_search();
                         }
                     });
@@ -375,7 +380,7 @@ impl FluxelApp {
                 self.refresh_tasks();
             }
             ui.label(
-                RichText::new("Ctrl+←/→ でステータス移動")
+                RichText::new(format!("{PRIMARY_KEY_LABEL}←/→ でステータス移動"))
                     .small()
                     .color(theme::MUTED),
             );
@@ -588,8 +593,10 @@ impl FluxelApp {
             );
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button("保存  Ctrl+Enter").clicked()
-                    || (ui.input(|input| input.modifiers.ctrl && input.key_pressed(Key::Enter)))
+                if ui
+                    .button(format!("保存  {PRIMARY_KEY_LABEL}Enter"))
+                    .clicked()
+                    || (ui.input(|input| input.modifiers.command && input.key_pressed(Key::Enter)))
                 {
                     save = true;
                 }
@@ -1137,6 +1144,11 @@ impl FluxelApp {
                     }
                 });
         });
+        ui.label(
+            RichText::new("行をクリックすると編集できます")
+                .small()
+                .color(theme::MUTED),
+        );
         ui.separator();
         let projects = self
             .gantt_projects
@@ -1158,6 +1170,21 @@ impl FluxelApp {
             .filter(|term| project_ids.contains(&term.project_id))
             .cloned()
             .collect::<Vec<_>>();
+        if projects.is_empty() {
+            egui::Frame::new()
+                .fill(theme::PANEL)
+                .stroke(Stroke::new(1.0, theme::BORDER))
+                .corner_radius(8)
+                .inner_margin(egui::Margin::same(18))
+                .show(ui, |ui| {
+                    ui.label(RichText::new("プロジェクトがありません").strong());
+                    ui.label(
+                        RichText::new("「＋ Project」から最初のプロジェクトを作成してください。")
+                            .color(theme::MUTED),
+                    );
+                });
+            return;
+        }
         let mut edit_project = None;
         let mut edit_term = None;
         gantt_canvas(ui, &projects, &terms, &mut edit_project, &mut edit_term);
@@ -1285,13 +1312,15 @@ impl FluxelApp {
                             egui::TextEdit::multiline(&mut term.description),
                         );
                         ui.horizontal(|ui| {
-                            ui.label("Start");
+                            ui.label("開始日");
                             date_editor(ui, &mut term.start_date);
-                            ui.label("End");
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("終了日");
                             date_editor(ui, &mut term.end_date);
                         });
                         ui.horizontal(|ui| {
-                            ui.label("Color");
+                            ui.label("色");
                             ui.text_edit_singleline(&mut term.color);
                         });
                         editor_buttons(
@@ -1503,7 +1532,7 @@ fn register_global_hotkeys() -> (Option<GlobalHotKeyManager>, Vec<(u32, Page)>) 
         log::warn!("global hotkeys are unavailable on this desktop session");
         return (None, Vec::new());
     };
-    let modifiers = Modifiers::CONTROL | Modifiers::ALT | Modifiers::SHIFT;
+    let modifiers = CMD_OR_CTRL | Modifiers::ALT | Modifiers::SHIFT;
     let mut registered = Vec::new();
     for (code, page) in [
         (Code::KeyK, Page::Kanban),
@@ -1543,8 +1572,8 @@ fn task_card(ui: &mut egui::Ui, task: &Task, selected: bool) -> egui::Response {
         painter.rect_filled(color_rect, 1.0, theme::importance_color(&task.importance));
         let x = rect.min.x + 16.0;
         painter.text(
-            egui::pos2(x, rect.min.y + 12.0),
-            Align2::LEFT_TOP,
+            egui::pos2(x, rect.min.y + 22.0),
+            Align2::LEFT_CENTER,
             if task.name.is_empty() {
                 "(no name)"
             } else {
@@ -1556,15 +1585,15 @@ fn task_card(ui: &mut egui::Ui, task: &Task, selected: bool) -> egui::Response {
         let due = due_label(&task.end_date);
         let due_color = due_color(&task.end_date);
         painter.text(
-            egui::pos2(rect.max.x - 8.0, rect.min.y + 12.0),
-            Align2::RIGHT_TOP,
+            egui::pos2(rect.max.x - 8.0, rect.min.y + 22.0),
+            Align2::RIGHT_CENTER,
             due,
             FontId::proportional(11.0),
             due_color,
         );
         painter.text(
-            egui::pos2(x, rect.min.y + 40.0),
-            Align2::LEFT_TOP,
+            egui::pos2(x, rect.min.y + 51.0),
+            Align2::LEFT_CENTER,
             preview(&task.description, 58),
             FontId::proportional(11.0),
             theme::MUTED,
@@ -1787,10 +1816,18 @@ fn gantt_canvas(
                 .collect::<Vec<_>>();
             let (rect, response) =
                 ui.allocate_exact_size(Vec2::new(canvas_width, 34.0), Sense::click());
-            ui.painter().rect_filled(rect, 0.0, theme::PANEL_ALT);
+            ui.painter().rect_filled(
+                rect,
+                0.0,
+                if response.hovered() {
+                    Color32::from_rgb(43, 49, 58)
+                } else {
+                    theme::PANEL_ALT
+                },
+            );
             ui.painter().text(
-                rect.min + Vec2::new(8.0, 9.0),
-                Align2::LEFT_TOP,
+                rect.left_center() + Vec2::new(8.0, 0.0),
+                Align2::LEFT_CENTER,
                 format!(
                     "{}{}",
                     project.title,
@@ -1799,23 +1836,43 @@ fn gantt_canvas(
                 FontId::proportional(13.0),
                 theme::TEXT,
             );
-            if response.double_clicked() {
+            ui.painter().text(
+                egui::pos2(rect.left() + left_width - 10.0, rect.center().y),
+                Align2::RIGHT_CENTER,
+                "編集",
+                FontId::proportional(10.0),
+                theme::MUTED,
+            );
+            if response
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
                 *edit_project = Some(project.clone());
             }
             row += 1;
             for term in project_terms {
                 let (rect, response) =
                     ui.allocate_exact_size(Vec2::new(canvas_width, 34.0), Sense::click());
-                if row.is_multiple_of(2) {
+                if response.hovered() {
+                    ui.painter()
+                        .rect_filled(rect, 0.0, Color32::from_rgb(39, 45, 53));
+                } else if row.is_multiple_of(2) {
                     ui.painter()
                         .rect_filled(rect, 0.0, Color32::from_rgb(25, 29, 34));
                 }
                 ui.painter().text(
-                    rect.min + Vec2::new(18.0, 9.0),
-                    Align2::LEFT_TOP,
+                    rect.left_center() + Vec2::new(18.0, 0.0),
+                    Align2::LEFT_CENTER,
                     &term.title,
                     FontId::proportional(12.0),
                     theme::TEXT,
+                );
+                ui.painter().text(
+                    egui::pos2(rect.left() + left_width - 10.0, rect.center().y),
+                    Align2::RIGHT_CENTER,
+                    "編集",
+                    FontId::proportional(10.0),
+                    theme::MUTED,
                 );
                 let start = (term.start_date - min_date).num_days() as f32;
                 let days = (term.end_date - term.start_date).num_days().max(0) as f32 + 1.0;
@@ -1844,7 +1901,10 @@ fn gantt_canvas(
                     ],
                     Stroke::new(1.0, theme::ORANGE),
                 );
-                if response.double_clicked() {
+                if response
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
                     *edit_term = Some(term.clone());
                 }
                 row += 1;
@@ -1889,13 +1949,32 @@ fn editor_buttons(
 }
 
 fn date_editor(ui: &mut egui::Ui, date: &mut NaiveDate) {
-    let mut raw = date.to_string();
-    if ui
-        .add_sized([100.0, 24.0], egui::TextEdit::singleline(&mut raw))
-        .changed()
-        && let Ok(parsed) = NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
-    {
-        *date = parsed;
+    let mut year = date.year();
+    let mut month = date.month();
+    let mut day = date.day();
+    let mut changed = false;
+    ui.spacing_mut().item_spacing.x = 3.0;
+    changed |= ui
+        .add_sized(
+            [64.0, 28.0],
+            egui::DragValue::new(&mut year).range(1970..=2200),
+        )
+        .changed();
+    ui.label("/");
+    changed |= ui
+        .add_sized([42.0, 28.0], egui::DragValue::new(&mut month).range(1..=12))
+        .changed();
+    ui.label("/");
+    changed |= ui
+        .add_sized([42.0, 28.0], egui::DragValue::new(&mut day).range(1..=31))
+        .changed();
+    if changed {
+        while NaiveDate::from_ymd_opt(year, month, day).is_none() && day > 1 {
+            day -= 1;
+        }
+        if let Some(value) = NaiveDate::from_ymd_opt(year, month, day) {
+            *date = value;
+        }
     }
 }
 

@@ -25,7 +25,7 @@ Windowsでは既存版と同じ`%LOCALAPPDATA%\Fluxel`を利用します。`loca
 - タスク検索、設定保存、`settings.ini` / `Tasks.db`のエクスポート
 - アプリ内ショートカットと、macOS / Windows共通のグローバルホットキー
 
-グローバルホットキーは`Ctrl+Alt+Shift+K`（Kanban）、`Ctrl+Alt+Shift+P`（ShortCut）、`Ctrl+Alt+Shift+O`（OpenFile）です。
+グローバルホットキーは、macOSでは`Cmd+Option+Shift+K/P/O`、Windowsでは`Ctrl+Alt+Shift+K/P/O`です。アプリ内の`Ctrl`系ショートカットも、macOSではすべて`Cmd`へ置き換わります。
 
 クラウドフォルダーの競合マージ機能と自動アップデーターは、移行の次段階です。設定ファイルの互換性を保つため同期フォルダー値は読み書きしますが、egui版からの同期実行はまだ行いません。
 
