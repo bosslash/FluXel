@@ -11,6 +11,8 @@ wheels/
 
 # Virtual environments
 .venv/
+fluxel-egui/target/
+fluxel-egui/dist/
 
 # Local application data and logs
 /Tasks.db

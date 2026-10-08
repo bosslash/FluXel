@@ -48,6 +48,43 @@ jobs:
         shell: pwsh
         run: ./scripts/ci-windows.ps1
 
+  egui-macos:
+    name: egui / macOS
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Test and build egui app
+        run: ./scripts/ci-egui-macos.sh
+
+      - name: Upload macOS executable
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fluxel-egui-macos
+          path: fluxel-egui/dist/Fluxel-macOS.tar.gz
+          if-no-files-found: error
+
+  egui-windows:
+    name: egui / Windows
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Test and build egui app
+        shell: pwsh
+        run: ./scripts/ci-egui-windows.ps1
+
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fluxel-egui-windows
+          path: fluxel-egui/dist/Fluxel.exe
+          if-no-files-found: error
+
   docker:
     name: Docker
     runs-on: ubuntu-24.04

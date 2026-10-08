@@ -1,0 +1,19 @@
+services:
+  dev:
+    build:
+      context: .
+    working_dir: /workspace
+    environment:
+      FLUXEL_DATA_DIR: /data
+    volumes:
+      - .:/workspace
+      - fluxel-data:/data
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - rust-target:/workspace/target
+
+volumes:
+  fluxel-data:
+  cargo-registry:
+  cargo-git:
+  rust-target:
