@@ -27,3 +27,8 @@ wheels/
 Thumbs.db
 .idea/
 .vscode/
+
+# Local scratch files
+/.cursor/
+/hello.py
+/memo.md
