@@ -72,7 +72,7 @@ fn platform_state_dir() -> Result<PathBuf> {
         let local = env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .context("LOCALAPPDATA is not set")?;
-        return Ok(local.join("Fluxel"));
+        Ok(local.join("Fluxel"))
     }
 
     #[cfg(not(target_os = "windows"))]
