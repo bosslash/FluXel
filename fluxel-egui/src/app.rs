@@ -37,6 +37,15 @@ enum GanttEditor {
     Term(GanttTerm, bool),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FocusTarget {
+    TaskName,
+    QuickTitle,
+    QuickSearch,
+    GanttTitle,
+    SearchQuery,
+}
+
 pub struct FluxelApp {
     storage: Storage,
     settings: AppSettings,
@@ -61,6 +70,7 @@ pub struct FluxelApp {
     gantt_terms: Vec<GanttTerm>,
     gantt_filter: Option<String>,
     gantt_editor: Option<GanttEditor>,
+    pending_focus: Option<FocusTarget>,
     _hotkey_manager: Option<GlobalHotKeyManager>,
     global_hotkeys: Vec<(u32, Page)>,
     toast: Option<(String, f64)>,
@@ -96,6 +106,7 @@ impl FluxelApp {
             gantt_terms: Vec::new(),
             gantt_filter: None,
             gantt_editor: None,
+            pending_focus: None,
             _hotkey_manager: hotkey_manager,
             global_hotkeys,
             toast: None,
@@ -190,11 +201,23 @@ impl FluxelApp {
         match page {
             Page::Kanban => self.refresh_tasks(),
             Page::Dashboard => self.refresh_dashboard(),
-            Page::Shortcut => self.refresh_quick(QuickAccessKind::Shortcut),
-            Page::OpenFile => self.refresh_quick(QuickAccessKind::OpenFile),
+            Page::Shortcut => {
+                self.refresh_quick(QuickAccessKind::Shortcut);
+                self.pending_focus = Some(FocusTarget::QuickSearch);
+            }
+            Page::OpenFile => {
+                self.refresh_quick(QuickAccessKind::OpenFile);
+                self.pending_focus = Some(FocusTarget::QuickSearch);
+            }
             Page::Gantt => self.refresh_gantt(),
             Page::Settings => {}
         }
+    }
+
+    fn open_search(&mut self) {
+        self.search_open = true;
+        self.pending_focus = Some(FocusTarget::SearchQuery);
+        self.refresh_search();
     }
 
     fn keyboard_shortcuts(&mut self, ctx: &egui::Context) {
@@ -213,11 +236,20 @@ impl FluxelApp {
             } else if ctx.input(|input| input.key_pressed(Key::O)) {
                 self.select_page(Page::OpenFile);
             } else if ctx.input(|input| input.key_pressed(Key::F)) {
-                self.search_open = true;
-                self.refresh_search();
+                self.open_search();
             } else if ctx.input(|input| input.key_pressed(Key::N)) {
                 self.new_for_current_page();
             }
+        }
+        if matches!(self.page, Page::Shortcut | Page::OpenFile)
+            && self.task_editor.is_none()
+            && self.quick_editor.is_none()
+            && self.gantt_editor.is_none()
+            && !self.search_open
+            && !ctx.egui_wants_keyboard_input()
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Slash))
+        {
+            self.pending_focus = Some(FocusTarget::QuickSearch);
         }
         if self.page == Page::Kanban && self.task_editor.is_none() && !self.search_open {
             if ctrl && ctx.input(|input| input.key_pressed(Key::ArrowLeft)) {
@@ -253,6 +285,7 @@ impl FluxelApp {
     fn new_for_current_page(&mut self) {
         match self.page {
             Page::Kanban => {
+                self.pending_focus = Some(FocusTarget::TaskName);
                 self.task_editor = Some(TaskEditor {
                     task: Task {
                         importance: "低".to_owned(),
@@ -264,6 +297,7 @@ impl FluxelApp {
                 })
             }
             Page::Shortcut => {
+                self.pending_focus = Some(FocusTarget::QuickTitle);
                 self.quick_editor = Some(QuickEditor {
                     kind: QuickAccessKind::Shortcut,
                     item: QuickAccessItem::default(),
@@ -271,6 +305,7 @@ impl FluxelApp {
                 })
             }
             Page::OpenFile => {
+                self.pending_focus = Some(FocusTarget::QuickTitle);
                 self.quick_editor = Some(QuickEditor {
                     kind: QuickAccessKind::OpenFile,
                     item: QuickAccessItem::default(),
@@ -287,10 +322,11 @@ impl FluxelApp {
             .frame(
                 egui::Frame::new()
                     .fill(Color32::from_rgb(37, 37, 37))
+                    .stroke(Stroke::new(1.0, theme::BORDER))
                     .inner_margin(egui::Margin::symmetric(12, 10)),
             )
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     for (page, label) in Page::ALL {
                         let active = self.page == page;
                         let text = RichText::new(label).color(if active {
@@ -306,8 +342,7 @@ impl FluxelApp {
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.button("検索  Ctrl+F").clicked() {
-                            self.search_open = true;
-                            self.refresh_search();
+                            self.open_search();
                         }
                     });
                 });
@@ -319,7 +354,7 @@ impl FluxelApp {
             .frame(
                 egui::Frame::new()
                     .fill(theme::BG)
-                    .inner_margin(egui::Margin::same(12)),
+                    .inner_margin(egui::Margin::same(16)),
             )
             .show(ui, |ui| match self.page {
                 Page::Kanban => self.kanban_ui(ui),
@@ -332,7 +367,7 @@ impl FluxelApp {
     }
 
     fn kanban_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("＋ 新しいタスク").clicked() {
                 self.new_for_current_page();
             }
@@ -456,6 +491,7 @@ impl FluxelApp {
     fn open_task(&mut self, id: &str) {
         match self.storage.get_task(id) {
             Ok(Some(task)) => {
+                self.pending_focus = Some(FocusTarget::TaskName);
                 self.task_editor = Some(TaskEditor {
                     task,
                     delete_armed: false,
@@ -467,6 +503,10 @@ impl FluxelApp {
     }
 
     fn task_editor_window(&mut self, ctx: &egui::Context) {
+        let focus_name = self.pending_focus == Some(FocusTarget::TaskName);
+        if focus_name {
+            self.pending_focus = None;
+        }
         let Some(editor) = self.task_editor.as_mut() else {
             return;
         };
@@ -481,16 +521,25 @@ impl FluxelApp {
             "タスクの編集"
         })
         .open(&mut open)
+        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
         .collapsible(false)
-        .resizable(true)
-        .default_width(540.0)
+        .resizable(false)
+        .default_width(520.0)
+        .min_width(340.0)
         .show(ctx, |ui| {
+            ui.spacing_mut().text_edit_width = (ui.available_width() - 116.0).max(190.0);
             egui::Grid::new("task-form-grid")
                 .num_columns(2)
                 .spacing([14.0, 10.0])
                 .show(ui, |ui| {
                     ui.label("タスク名:");
-                    ui.text_edit_singleline(&mut editor.task.name);
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut editor.task.name)
+                            .hint_text("タスク名を入力"),
+                    );
+                    if focus_name {
+                        response.request_focus();
+                    }
                     ui.end_row();
                     ui.label("完了日付:");
                     ui.text_edit_singleline(&mut editor.task.end_date);
@@ -530,6 +579,7 @@ impl FluxelApp {
                         ui.end_row();
                     }
                 });
+            ui.add_space(4.0);
             ui.label("タスク説明:");
             ui.add_sized(
                 [ui.available_width(), 150.0],
@@ -564,10 +614,14 @@ impl FluxelApp {
                     });
                 }
             });
+            if ui.input(|input| input.key_pressed(Key::Escape)) {
+                close_requested = true;
+            }
         });
         if save {
             let mut task = self.task_editor.as_ref().unwrap().task.clone();
             if task.name.trim().is_empty() {
+                self.pending_focus = Some(FocusTarget::TaskName);
                 self.set_message("タスク名を入力してください");
             } else {
                 match self.storage.save_task(&mut task) {
@@ -614,17 +668,28 @@ impl FluxelApp {
         let mut open = self.search_open;
         let mut selected = None;
         let mut changed = false;
+        let escape_pressed = ctx.input(|input| input.key_pressed(Key::Escape));
+        let focus_query = self.pending_focus == Some(FocusTarget::SearchQuery);
+        if focus_query {
+            self.pending_focus = None;
+        }
         egui::Window::new("タスク検索")
             .open(&mut open)
+            .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+            .collapsible(false)
             .default_width(620.0)
             .default_height(460.0)
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    let query_width = (ui.available_width() - 150.0).max(220.0);
                     let response = ui.add_sized(
-                        [420.0, 30.0],
+                        [query_width, 32.0],
                         egui::TextEdit::singleline(&mut self.search_query)
                             .hint_text("タイトル・本文・重要度を検索"),
                     );
+                    if focus_query {
+                        response.request_focus();
+                    }
                     changed |= response.changed();
                     changed |= ui
                         .checkbox(&mut self.search_include_archive, "Archiveを含む")
@@ -650,6 +715,9 @@ impl FluxelApp {
                     }
                 });
             });
+        if escape_pressed {
+            open = false;
+        }
         self.search_open = open;
         if changed {
             self.refresh_search();
@@ -669,39 +737,9 @@ impl FluxelApp {
         };
         ui.heading(title);
         let mut changed = false;
-        ui.horizontal(|ui| {
-            if is_shortcut {
-                changed |= ui
-                    .add_sized(
-                        [340.0, 30.0],
-                        egui::TextEdit::singleline(&mut self.shortcut_query)
-                            .hint_text("検索  / でフォーカス"),
-                    )
-                    .changed();
-                changed |= ui
-                    .add_sized(
-                        [220.0, 30.0],
-                        egui::TextEdit::singleline(&mut self.shortcut_tag_query)
-                            .hint_text("タグで絞り込み"),
-                    )
-                    .changed();
-            } else {
-                changed |= ui
-                    .add_sized(
-                        [340.0, 30.0],
-                        egui::TextEdit::singleline(&mut self.openfile_query)
-                            .hint_text("検索  / でフォーカス"),
-                    )
-                    .changed();
-                changed |= ui
-                    .add_sized(
-                        [220.0, 30.0],
-                        egui::TextEdit::singleline(&mut self.openfile_tag_query)
-                            .hint_text("タグで絞り込み"),
-                    )
-                    .changed();
-            }
+        ui.horizontal_wrapped(|ui| {
             if ui.button(add_label).clicked() {
+                self.pending_focus = Some(FocusTarget::QuickTitle);
                 self.quick_editor = Some(QuickEditor {
                     kind,
                     item: QuickAccessItem::default(),
@@ -712,6 +750,7 @@ impl FluxelApp {
                 && ui.button("ファイル選択から追加").clicked()
                 && let Some(path) = rfd::FileDialog::new().pick_file()
             {
+                self.pending_focus = Some(FocusTarget::QuickTitle);
                 self.quick_editor = Some(QuickEditor {
                     kind,
                     item: QuickAccessItem {
@@ -725,6 +764,48 @@ impl FluxelApp {
                     },
                     delete_armed: false,
                 });
+            }
+        });
+        ui.add_space(4.0);
+        let focus_search = self.pending_focus == Some(FocusTarget::QuickSearch);
+        if focus_search {
+            self.pending_focus = None;
+        }
+        ui.columns(2, |columns| {
+            if is_shortcut {
+                let response = columns[0].add_sized(
+                    [columns[0].available_width(), 32.0],
+                    egui::TextEdit::singleline(&mut self.shortcut_query)
+                        .hint_text("検索  / でフォーカス"),
+                );
+                if focus_search {
+                    response.request_focus();
+                }
+                changed |= response.changed();
+                changed |= columns[1]
+                    .add_sized(
+                        [columns[1].available_width(), 32.0],
+                        egui::TextEdit::singleline(&mut self.shortcut_tag_query)
+                            .hint_text("タグで絞り込み"),
+                    )
+                    .changed();
+            } else {
+                let response = columns[0].add_sized(
+                    [columns[0].available_width(), 32.0],
+                    egui::TextEdit::singleline(&mut self.openfile_query)
+                        .hint_text("検索  / でフォーカス"),
+                );
+                if focus_search {
+                    response.request_focus();
+                }
+                changed |= response.changed();
+                changed |= columns[1]
+                    .add_sized(
+                        [columns[1].available_width(), 32.0],
+                        egui::TextEdit::singleline(&mut self.openfile_tag_query)
+                            .hint_text("タグで絞り込み"),
+                    )
+                    .changed();
             }
         });
         if changed {
@@ -747,21 +828,9 @@ impl FluxelApp {
                     .corner_radius(5)
                     .inner_margin(egui::Margin::same(10))
                     .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
                         ui.horizontal(|ui| {
-                            ui.vertical(|ui| {
-                                ui.label(RichText::new(&item.title).strong());
-                                ui.label(RichText::new(&item.value).small().color(theme::MUTED));
-                                if !item.tags.is_empty() {
-                                    ui.label(
-                                        RichText::new(format!(
-                                            "# {}",
-                                            item.tags.replace(',', "  #")
-                                        ))
-                                        .small()
-                                        .color(theme::ACCENT),
-                                    );
-                                }
-                            });
+                            ui.label(RichText::new(&item.title).strong());
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if ui.button("編集").clicked() {
                                     edit = Some(item.clone());
@@ -779,11 +848,25 @@ impl FluxelApp {
                                 );
                             });
                         });
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&item.value).small().color(theme::MUTED),
+                            )
+                            .wrap(),
+                        );
+                        if !item.tags.is_empty() {
+                            ui.label(
+                                RichText::new(format!("# {}", item.tags.replace(',', "  #")))
+                                    .small()
+                                    .color(theme::ACCENT),
+                            );
+                        }
                     });
                 ui.add_space(6.0);
             }
         });
         if let Some(item) = edit {
+            self.pending_focus = Some(FocusTarget::QuickTitle);
             self.quick_editor = Some(QuickEditor {
                 kind,
                 item,
@@ -832,6 +915,10 @@ impl FluxelApp {
     }
 
     fn quick_editor_window(&mut self, ctx: &egui::Context) {
+        let focus_title = self.pending_focus == Some(FocusTarget::QuickTitle);
+        if focus_title {
+            self.pending_focus = None;
+        }
         let Some(editor) = self.quick_editor.as_mut() else {
             return;
         };
@@ -847,11 +934,20 @@ impl FluxelApp {
             "OpenFile項目"
         })
         .open(&mut open)
+        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
         .collapsible(false)
+        .resizable(false)
         .default_width(520.0)
+        .min_width(340.0)
         .show(ctx, |ui| {
             ui.label("タイトル");
-            ui.text_edit_singleline(&mut editor.item.title);
+            let response = ui.add_sized(
+                [ui.available_width(), 32.0],
+                egui::TextEdit::singleline(&mut editor.item.title).hint_text("表示名"),
+            );
+            if focus_title {
+                response.request_focus();
+            }
             ui.label(if is_shortcut {
                 "コマンド／テキスト／URL"
             } else {
@@ -870,7 +966,10 @@ impl FluxelApp {
                 }
             });
             ui.label("タグ（カンマ区切り）");
-            ui.text_edit_singleline(&mut editor.item.tags);
+            ui.add_sized(
+                [ui.available_width(), 32.0],
+                egui::TextEdit::singleline(&mut editor.item.tags).hint_text("例: work, daily"),
+            );
             ui.horizontal(|ui| {
                 if ui.button("保存").clicked() {
                     save = true;
@@ -896,10 +995,14 @@ impl FluxelApp {
                     });
                 }
             });
+            if ui.input(|input| input.key_pressed(Key::Escape)) {
+                close_requested = true;
+            }
         });
         if save {
             let mut editor = self.quick_editor.clone().unwrap();
             if editor.item.title.trim().is_empty() || editor.item.value.trim().is_empty() {
+                self.pending_focus = Some(FocusTarget::QuickTitle);
                 self.set_message("タイトルと値を入力してください");
             } else {
                 match self
@@ -1003,9 +1106,10 @@ impl FluxelApp {
     }
 
     fn gantt_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.heading("GANTT PLANNING");
             if ui.button("＋ Project").clicked() {
+                self.pending_focus = Some(FocusTarget::GanttTitle);
                 self.gantt_editor = Some(GanttEditor::Project(GanttProject::default(), false));
             }
             if ui.button("＋ Term").clicked() {
@@ -1058,9 +1162,11 @@ impl FluxelApp {
         let mut edit_term = None;
         gantt_canvas(ui, &projects, &terms, &mut edit_project, &mut edit_term);
         if let Some(project) = edit_project {
+            self.pending_focus = Some(FocusTarget::GanttTitle);
             self.gantt_editor = Some(GanttEditor::Project(project, false));
         }
         if let Some(term) = edit_term {
+            self.pending_focus = Some(FocusTarget::GanttTitle);
             self.gantt_editor = Some(GanttEditor::Term(term, false));
         }
     }
@@ -1071,6 +1177,7 @@ impl FluxelApp {
             return;
         };
         let today = Local::now().date_naive();
+        self.pending_focus = Some(FocusTarget::GanttTitle);
         self.gantt_editor = Some(GanttEditor::Term(
             GanttTerm {
                 id: String::new(),
@@ -1087,6 +1194,10 @@ impl FluxelApp {
     }
 
     fn gantt_editor_window(&mut self, ctx: &egui::Context) {
+        let focus_title = self.pending_focus == Some(FocusTarget::GanttTitle);
+        if focus_title {
+            self.pending_focus = None;
+        }
         let Some(editor) = self.gantt_editor.as_mut() else {
             return;
         };
@@ -1103,14 +1214,26 @@ impl FluxelApp {
                     "Edit Project"
                 })
                 .open(&mut open)
+                .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
                 .collapsible(false)
+                .resizable(false)
                 .default_width(480.0)
                 .show(ctx, |ui| {
-                    ui.label("Title");
-                    ui.text_edit_singleline(&mut project.title);
-                    ui.label("Description");
-                    ui.text_edit_multiline(&mut project.description);
-                    ui.checkbox(&mut project.is_completed, "Completed");
+                    ui.label("プロジェクト名");
+                    let response = ui.add_sized(
+                        [ui.available_width(), 32.0],
+                        egui::TextEdit::singleline(&mut project.title)
+                            .hint_text("プロジェクト名を入力"),
+                    );
+                    if focus_title {
+                        response.request_focus();
+                    }
+                    ui.label("説明");
+                    ui.add_sized(
+                        [ui.available_width(), 100.0],
+                        egui::TextEdit::multiline(&mut project.description),
+                    );
+                    ui.checkbox(&mut project.is_completed, "完了済み");
                     editor_buttons(
                         ui,
                         is_new,
@@ -1125,10 +1248,12 @@ impl FluxelApp {
                 let is_new = term.id.is_empty();
                 egui::Window::new(if is_new { "New Term" } else { "Edit Term" })
                     .open(&mut open)
+                    .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
                     .collapsible(false)
+                    .resizable(false)
                     .default_width(500.0)
                     .show(ctx, |ui| {
-                        ui.label("Project");
+                        ui.label("プロジェクト");
                         egui::ComboBox::from_id_salt("term-project")
                             .selected_text(
                                 self.gantt_projects
@@ -1146,10 +1271,19 @@ impl FluxelApp {
                                     );
                                 }
                             });
-                        ui.label("Title");
-                        ui.text_edit_singleline(&mut term.title);
-                        ui.label("Description");
-                        ui.text_edit_multiline(&mut term.description);
+                        ui.label("期間名");
+                        let response = ui.add_sized(
+                            [ui.available_width(), 32.0],
+                            egui::TextEdit::singleline(&mut term.title).hint_text("期間名を入力"),
+                        );
+                        if focus_title {
+                            response.request_focus();
+                        }
+                        ui.label("説明");
+                        ui.add_sized(
+                            [ui.available_width(), 90.0],
+                            egui::TextEdit::multiline(&mut term.description),
+                        );
                         ui.horizontal(|ui| {
                             ui.label("Start");
                             date_editor(ui, &mut term.start_date);
@@ -1170,6 +1304,9 @@ impl FluxelApp {
                         );
                     });
             }
+        }
+        if ctx.input(|input| input.key_pressed(Key::Escape)) {
+            close_requested = true;
         }
         if save {
             let editor = self.gantt_editor.clone().unwrap();
@@ -1228,10 +1365,11 @@ impl FluxelApp {
                 ui.label("Finish → Archive の日数");
                 ui.add(egui::DragValue::new(&mut self.settings.archive_after_days).range(1..=365));
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("同期フォルダー");
+                let field_width = (ui.available_width() - 70.0).clamp(180.0, 520.0);
                 ui.add_sized(
-                    [420.0, 28.0],
+                    [field_width, 32.0],
                     egui::TextEdit::singleline(&mut self.settings.sync_folder),
                 );
                 if ui.button("選択").clicked() {
@@ -1775,9 +1913,13 @@ fn settings_card(ui: &mut egui::Ui, title: &str, content: impl FnOnce(&mut egui:
 }
 
 fn path_row(ui: &mut egui::Ui, label: &str, path: &std::path::Path) {
-    ui.horizontal(|ui| {
-        ui.label(label);
-        ui.label(RichText::new(path.display().to_string()).color(theme::MUTED));
+    ui.label(RichText::new(label).small().color(theme::MUTED));
+    ui.horizontal_top(|ui| {
+        let button_space = 60.0;
+        ui.add_sized(
+            [(ui.available_width() - button_space).max(180.0), 32.0],
+            egui::Label::new(RichText::new(path.display().to_string()).color(theme::TEXT)).wrap(),
+        );
         if ui.small_button("開く").clicked() {
             let _ = open::that(path);
         }

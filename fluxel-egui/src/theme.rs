@@ -26,14 +26,22 @@ pub fn apply(ctx: &egui::Context) {
     visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, ACCENT);
     visuals.widgets.active.bg_fill = Color32::from_rgb(40, 68, 91);
     visuals.widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
+    visuals.widgets.noninteractive.corner_radius = CornerRadius::same(6);
+    visuals.widgets.inactive.corner_radius = CornerRadius::same(6);
+    visuals.widgets.hovered.corner_radius = CornerRadius::same(6);
+    visuals.widgets.active.corner_radius = CornerRadius::same(6);
+    visuals.widgets.open.corner_radius = CornerRadius::same(6);
     visuals.selection.bg_fill = Color32::from_rgb(40, 68, 91);
     visuals.selection.stroke = Stroke::new(1.0, ACCENT);
     visuals.window_corner_radius = CornerRadius::same(8);
     ctx.set_visuals(visuals);
 
     let mut style = (*ctx.style_of(egui::Theme::Dark)).clone();
-    style.spacing.item_spacing = egui::vec2(8.0, 7.0);
-    style.spacing.button_padding = egui::vec2(12.0, 6.0);
+    style.spacing.item_spacing = egui::vec2(9.0, 8.0);
+    style.spacing.button_padding = egui::vec2(13.0, 7.0);
+    style.spacing.interact_size = egui::vec2(40.0, 32.0);
+    style.spacing.text_edit_width = 280.0;
+    style.spacing.window_margin = egui::Margin::same(16);
     style
         .text_styles
         .insert(TextStyle::Heading, egui::FontId::proportional(21.0));
