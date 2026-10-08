@@ -86,7 +86,14 @@ pub struct FluxelApp {
 
 impl FluxelApp {
     pub fn new(cc: &eframe::CreationContext<'_>, storage: Storage) -> Self {
-        egui_system_fonts::add_auto(&cc.egui_ctx, egui_system_fonts::FontStyle::Sans);
+        egui_system_fonts::set_with_presets(
+            &cc.egui_ctx,
+            [
+                egui_system_fonts::FontPreset::Japanese,
+                egui_system_fonts::FontPreset::Latin,
+            ],
+            egui_system_fonts::FontStyle::Sans,
+        );
         theme::apply(&cc.egui_ctx);
         let settings = AppSettings::load(&storage.paths.settings_file);
         let (hotkey_manager, global_hotkeys) = register_global_hotkeys();
