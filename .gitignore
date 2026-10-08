@@ -13,6 +13,7 @@ wheels/
 .venv/
 fluxel-egui/target/
 fluxel-egui/dist/
+/.dev-tools/
 
 # Local application data and logs
 /Tasks.db

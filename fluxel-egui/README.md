@@ -63,8 +63,17 @@ Windows PowerShell:
 
 ## ホストへRustを入れて実行する場合
 
+macOSでは、リポジトリ内だけに最小構成のRustを導入できます。シェルのPATHや`~/.cargo`、`~/.rustup`は変更しません。
+
 ```sh
-cargo run --release
+./scripts/bootstrap-egui-macos.sh
+./scripts/run-egui-macos.sh
 ```
 
-Rustを入れたくない場合はこの手順は不要です。
+初回だけRust 1.95.0と依存ライブラリを取得します。2回目以降は差分だけをビルドして起動します。配布用の最適化ビルドが必要な場合は次のように実行します。
+
+```sh
+./scripts/run-egui-macos.sh --release
+```
+
+ローカルRust環境を削除する場合は、Fluxelを終了してリポジトリ直下の`.dev-tools`を削除してください。Dockerだけを使う場合はこの手順は不要です。
