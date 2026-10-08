@@ -57,6 +57,8 @@ pub struct FluxelApp {
     page: Page,
     tasks: Vec<Task>,
     selected_task: Option<String>,
+    focused_status: String,
+    column_vertical_index: usize,
     task_editor: Option<TaskEditor>,
     search_open: bool,
     search_query: String,
@@ -93,6 +95,8 @@ impl FluxelApp {
             page: Page::Kanban,
             tasks: Vec::new(),
             selected_task: None,
+            focused_status: String::new(),
+            column_vertical_index: 0,
             task_editor: None,
             search_open: false,
             search_query: String::new(),
@@ -139,8 +143,15 @@ impl FluxelApp {
                 {
                     self.selected_task = None;
                 }
-                if self.selected_task.is_none() {
-                    self.selected_task = self.tasks.first().map(|task| task.id.clone());
+                if let Some(id) = self.selected_task.clone() {
+                    self.select_task(&id);
+                } else if self.focused_status.is_empty() {
+                    if let Some(task) = self.tasks.first() {
+                        let id = task.id.clone();
+                        self.select_task(&id);
+                    } else {
+                        self.focused_status = STATUS_ORDER[0].to_owned();
+                    }
                 }
             }
             Err(error) => self.set_error(error),
@@ -261,6 +272,10 @@ impl FluxelApp {
                 self.move_selected_status(-1);
             } else if primary && ctx.input(|input| input.key_pressed(Key::ArrowRight)) {
                 self.move_selected_status(1);
+            } else if !primary && ctx.input(|input| input.key_pressed(Key::ArrowLeft)) {
+                self.move_column_focus(-1);
+            } else if !primary && ctx.input(|input| input.key_pressed(Key::ArrowRight)) {
+                self.move_column_focus(1);
             } else if !primary && ctx.input(|input| input.key_pressed(Key::ArrowUp)) {
                 self.move_task_selection(-1);
             } else if !primary && ctx.input(|input| input.key_pressed(Key::ArrowDown)) {
@@ -380,14 +395,17 @@ impl FluxelApp {
                 self.refresh_tasks();
             }
             ui.label(
-                RichText::new(format!("{PRIMARY_KEY_LABEL}←/→ でステータス移動"))
-                    .small()
-                    .color(theme::MUTED),
+                RichText::new(format!(
+                    "←/→ 列移動  ·  ↑/↓ カード選択  ·  {PRIMARY_KEY_LABEL}←/→ ステータス移動"
+                ))
+                .small()
+                .color(theme::MUTED),
             );
         });
         ui.add_space(4.0);
 
         let mut clicked: Option<(String, bool)> = None;
+        let mut clicked_column: Option<String> = None;
         ScrollArea::horizontal()
             .id_salt("kanban-horizontal")
             .show(ui, |ui| {
@@ -405,60 +423,157 @@ impl FluxelApp {
                             .filter(|task| task.status.eq_ignore_ascii_case(status))
                             .cloned()
                             .collect::<Vec<_>>();
-                        ui.vertical(|ui| {
-                            ui.set_width(272.0);
-                            ui.horizontal(|ui| {
-                                ui.heading(label);
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    ui.label(
-                                        RichText::new(format!("{}件", tasks.len()))
-                                            .small()
-                                            .color(theme::MUTED),
-                                    );
+                        let column_focused = self.focused_status == status;
+                        let column = egui::Frame::new()
+                            .fill(if column_focused {
+                                Color32::from_rgb(25, 34, 43)
+                            } else {
+                                Color32::TRANSPARENT
+                            })
+                            .stroke(Stroke::new(
+                                if column_focused { 2.0 } else { 1.0 },
+                                if column_focused {
+                                    theme::ACCENT
+                                } else {
+                                    theme::BORDER
+                                },
+                            ))
+                            .corner_radius(6)
+                            .inner_margin(egui::Margin::same(8))
+                            .show(ui, |ui| {
+                                ui.set_width(254.0);
+                                ui.set_min_height((ui.available_height() - 16.0).max(240.0));
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(label).heading().color(
+                                        if column_focused {
+                                            theme::ACCENT
+                                        } else {
+                                            theme::TEXT
+                                        },
+                                    ));
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        ui.label(
+                                            RichText::new(format!("{}件", tasks.len()))
+                                                .small()
+                                                .color(theme::MUTED),
+                                        );
+                                    });
                                 });
+                                ui.separator();
+                                ScrollArea::vertical()
+                                    .id_salt(format!("kanban-{status}"))
+                                    .max_height(ui.available_height())
+                                    .show(ui, |ui| {
+                                        for task in &tasks {
+                                            let selected = self.selected_task.as_deref()
+                                                == Some(task.id.as_str());
+                                            let response = task_card(ui, task, selected);
+                                            if response.clicked() {
+                                                clicked = Some((task.id.clone(), false));
+                                            }
+                                            if response.double_clicked() {
+                                                clicked = Some((task.id.clone(), true));
+                                            }
+                                            ui.add_space(4.0);
+                                        }
+                                    });
                             });
-                            ui.separator();
-                            ScrollArea::vertical()
-                                .id_salt(format!("kanban-{status}"))
-                                .max_height(ui.available_height())
-                                .show(ui, |ui| {
-                                    for task in &tasks {
-                                        let selected =
-                                            self.selected_task.as_deref() == Some(task.id.as_str());
-                                        let response = task_card(ui, task, selected);
-                                        if response.clicked() {
-                                            clicked = Some((task.id.clone(), false));
-                                        }
-                                        if response.double_clicked() {
-                                            clicked = Some((task.id.clone(), true));
-                                        }
-                                        ui.add_space(4.0);
-                                    }
-                                });
-                        });
+                        if column_focused {
+                            column.response.scroll_to_me(Some(Align::Center));
+                        }
+                        if column.response.interact(Sense::click()).clicked() {
+                            clicked_column = Some(status.to_owned());
+                        }
                         ui.add(egui::Separator::default().vertical().spacing(6.0));
                     }
                 });
             });
         if let Some((id, edit)) = clicked {
-            self.selected_task = Some(id.clone());
+            self.select_task(&id);
             if edit {
                 self.open_task(&id);
             }
+        } else if let Some(status) = clicked_column {
+            self.focus_column(&status, self.column_vertical_index);
         }
     }
 
     fn move_task_selection(&mut self, delta: isize) {
-        if self.tasks.is_empty() {
+        let status = self.focused_status.clone();
+        let tasks = self
+            .tasks
+            .iter()
+            .filter(|task| task.status.eq_ignore_ascii_case(&status))
+            .map(|task| task.id.clone())
+            .collect::<Vec<_>>();
+        if tasks.is_empty() {
             return;
         }
-        let index = self
+        let current = self
             .selected_task
             .as_ref()
-            .and_then(|id| self.tasks.iter().position(|task| &task.id == id))
+            .and_then(|id| tasks.iter().position(|task_id| task_id == id));
+        let next = match current {
+            Some(index) => (index as isize + delta).clamp(0, tasks.len() as isize - 1) as usize,
+            None if delta < 0 => tasks.len() - 1,
+            None => 0,
+        };
+        self.column_vertical_index = next;
+        self.selected_task = Some(tasks[next].clone());
+    }
+
+    fn move_column_focus(&mut self, delta: isize) {
+        let current_status = self
+            .selected_task
+            .as_ref()
+            .and_then(|id| self.tasks.iter().find(|task| &task.id == id))
+            .map(|task| task.status.as_str())
+            .unwrap_or(self.focused_status.as_str());
+        let current = STATUS_ORDER
+            .iter()
+            .position(|status| status.eq_ignore_ascii_case(current_status))
             .unwrap_or(0);
-        let next = (index as isize + delta).clamp(0, self.tasks.len() as isize - 1) as usize;
-        self.selected_task = Some(self.tasks[next].id.clone());
+        let next = current as isize + delta;
+        if !(0..STATUS_ORDER.len() as isize).contains(&next) {
+            return;
+        }
+        let vertical_index = self.column_vertical_index;
+        self.focus_column(STATUS_ORDER[next as usize], vertical_index);
+    }
+
+    fn focus_column(&mut self, status: &str, preferred_index: usize) {
+        self.focused_status = status.to_owned();
+        self.column_vertical_index = preferred_index;
+        let target = self
+            .tasks
+            .iter()
+            .filter(|task| task.status.eq_ignore_ascii_case(status))
+            .nth(preferred_index)
+            .or_else(|| {
+                self.tasks
+                    .iter()
+                    .rfind(|task| task.status.eq_ignore_ascii_case(status))
+            })
+            .map(|task| task.id.clone());
+        if let Some(id) = target {
+            self.select_task(&id);
+        } else {
+            self.selected_task = None;
+        }
+    }
+
+    fn select_task(&mut self, id: &str) {
+        let Some(task) = self.tasks.iter().find(|task| task.id == id) else {
+            return;
+        };
+        self.focused_status = task.status.clone();
+        self.column_vertical_index = self
+            .tasks
+            .iter()
+            .filter(|candidate| candidate.status.eq_ignore_ascii_case(&task.status))
+            .position(|candidate| candidate.id == task.id)
+            .unwrap_or(0);
+        self.selected_task = Some(task.id.clone());
     }
 
     fn move_selected_status(&mut self, delta: isize) {
