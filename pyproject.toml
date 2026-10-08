@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fluxel"
+dynamic = ["version"]
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "pyside6>=6.11.0",
+]
+
+[project.optional-dependencies]
+pack = ["pyinstaller>=6.10.0"]
+
+[project.scripts]
+fluxel-seed = "fluxel.cli_seed:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fluxel*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "fluxel.__about__.APP_SEMVER"}

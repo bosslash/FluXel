@@ -1,0 +1,15 @@
+Welcome to Fluxel Setup.
+
+This wizard installs Fluxel and registers its uninstaller.
+
+During setup you can choose the folder used for the three SQLite databases:
+  Tasks.db
+  QuickAccess.db
+  Planning.db
+
+The default location is:
+  %LOCALAPPDATA%\Fluxel\
+
+The settings INI remains in the local application-data folder by default and can be moved later from Settings > Storage.
+
+OneDrive can be selected, but SQLite requires special care. Keep the folder available offline, never run Fluxel on multiple computers at the same time, and wait for synchronization to complete before switching computers.
