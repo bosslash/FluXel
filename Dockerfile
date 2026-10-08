@@ -16,7 +16,7 @@ RUN apt-get update \
         libfontconfig1 \
         libgl1 \
         libglib2.0-0t64 \
-        libkrb5-3 \
+        libgssapi-krb5-2 \
         libice6 \
         libsm6 \
         libx11-6 \
