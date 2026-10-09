@@ -1,6 +1,6 @@
 # Fluxel egui
 
-既存のFluxelをRustと`eframe/egui`で再実装する独立プロジェクトです。Python/PySide版はリポジトリ直下に残し、移行完了までは両方を並行して利用できます。
+既存のFluxelをRustと`eframe/egui`で再実装したデスクトップ版です。Python/PySide版と同じSQLiteと同期イベント形式を利用します。
 
 ## データ互換
 
@@ -20,14 +20,15 @@ Windowsでは既存版と同じ`%LOCALAPPDATA%\Fluxel`を利用します。`loca
 
 - Kanban（5列、追加・編集・削除、ステータス移動、自動Archive）
 - Dashboard（残件・期限・重要度の集計）
-- ShortCut / OpenFile（タグ検索、コピー・URL・ファイル実行）
-- Gantt（プロジェクト・期間の編集とタイムライン表示）
+- ShortCut / OpenFile（タグ検索、保存文字列のコピー、ファイル実行）
+- Gantt（プロジェクト・期間の編集、選択、並べ替え、プロジェクト移動、バーの日付移動、拡大縮小）
 - タスク検索、設定保存、`settings.ini` / `Tasks.db`のエクスポート
+- OneDriveフォルダー同期（Python版と同じ`.fluxel-sync/v1`、競合記録対応）
 - アプリ内ショートカットと、macOS / Windows共通のグローバルホットキー
 
 グローバルホットキーは、macOSでは`Cmd+Option+Shift+K/P/O`、Windowsでは`Ctrl+Alt+Shift+K/P/O`です。アプリ内の`Ctrl`系ショートカットも、macOSではすべて`Cmd`へ置き換わります。
 
-クラウドフォルダーの競合マージ機能と自動アップデーターは、移行の次段階です。設定ファイルの互換性を保つため同期フォルダー値は読み書きしますが、egui版からの同期実行はまだ行いません。
+`Cmd/Ctrl+S`またはSetting画面から同期を実行できます。自動アップデーターは内蔵せず、GitHub ReleasesでmacOS / Windowsの配布物を公開します。
 
 ## ホストへRustを入れずに開発
 

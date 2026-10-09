@@ -1,6 +1,6 @@
 # Fluxel
 
-既存のPySide6版に加え、SQLiteの仕様と画面構成を引き継ぐRust/egui版を`fluxel-egui/`で開発しています。移行中も既存版はそのまま利用できます。
+既存のPySide6版に加え、SQLiteの仕様、操作、フォルダー同期を引き継ぐRust/egui版を`fluxel-egui/`で提供しています。既存版と同じデータを開けるため、切り替え前に並行確認できます。
 
 ## Rust / egui版
 
@@ -13,7 +13,7 @@ docker compose run --rm dev
 
 既存の`Tasks.db`、`QuickAccess.db`、`Planning.db`、`settings.ini`、`location.ini`を読み書きします。実データと分離したい場合は`FLUXEL_DATA_DIR`で保存先を指定できます。詳しくは[`fluxel-egui/README.md`](fluxel-egui/README.md)を参照してください。
 
-GitHub ActionsではmacOS版とWindows版をネイティブビルドし、各実行結果のArtifactsからダウンロードできます。
+GitHub ActionsではmacOS版とWindows版をネイティブビルドし、タグ付きビルドはGitHub Releasesへ自動配布します。
 
 ## Python / PySide6版
 

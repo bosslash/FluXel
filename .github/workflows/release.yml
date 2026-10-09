@@ -1,0 +1,53 @@
+name: Release egui desktop apps
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: ./scripts/ci-egui-macos.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fluxel-egui-macos
+          path: fluxel-egui/dist/Fluxel-macOS.tar.gz
+          if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - shell: pwsh
+        run: ./scripts/ci-egui-windows.ps1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fluxel-egui-windows
+          path: fluxel-egui/dist/Fluxel.exe
+          if-no-files-found: error
+
+  publish:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: release-assets
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          release-assets/fluxel-egui-macos/Fluxel-macOS.tar.gz
+          release-assets/fluxel-egui-windows/Fluxel.exe
+          --repo "${GITHUB_REPOSITORY}"
+          --generate-notes
+          --title "Fluxel ${GITHUB_REF_NAME}"
