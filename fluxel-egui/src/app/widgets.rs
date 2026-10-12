@@ -80,6 +80,28 @@ pub(super) fn settings_card(ui: &mut egui::Ui, title: &str, content: impl FnOnce
         });
 }
 
+/// Paints one line inside a strict width and adds an ellipsis when it does not fit.
+///
+/// Painter text normally extends beyond the allocated widget, which can make dense
+/// boards and timelines overlap adjacent columns. Keeping this behavior in one helper
+/// gives every custom-painted row the same clipping and vertical alignment.
+pub(super) fn paint_elided_text(
+    ui: &egui::Ui,
+    position: egui::Pos2,
+    text: impl Into<String>,
+    font_id: FontId,
+    color: Color32,
+    max_width: f32,
+) {
+    let mut job = egui::text::LayoutJob::simple(text.into(), font_id, color, max_width.max(1.0));
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    job.wrap.overflow_character = Some('…');
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    let top_left = egui::pos2(position.x, position.y - galley.size().y / 2.0);
+    ui.painter().galley(top_left, galley, color);
+}
+
 pub(super) fn path_row(ui: &mut egui::Ui, label: &str, path: &std::path::Path) {
     ui.label(RichText::new(label).small().color(theme::MUTED));
     ui.horizontal_top(|ui| {

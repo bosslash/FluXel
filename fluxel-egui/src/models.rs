@@ -19,7 +19,7 @@ impl Page {
         (Self::Shortcut, "ShortCut"),
         (Self::OpenFile, "OpenFile"),
         (Self::Gantt, "Gantt"),
-        (Self::Settings, "Setting"),
+        (Self::Settings, "Settings"),
     ];
 }
 

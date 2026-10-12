@@ -14,7 +14,22 @@ impl FluxelApp {
                 self.new_gantt_term();
             }
             if ui.button("Today").clicked() {
-                self.gantt_filter = None;
+                self.gantt_scroll_to_today = true;
+            }
+            let can_move_term = self.selected_gantt_term.is_some();
+            if ui
+                .add_enabled(can_move_term, egui::Button::new("← 1日"))
+                .on_hover_text(format!("選択期間を1日前へ移動 ({PRIMARY_KEY_LABEL}←)"))
+                .clicked()
+            {
+                self.move_selected_gantt_days(-1);
+            }
+            if ui
+                .add_enabled(can_move_term, egui::Button::new("1日 →"))
+                .on_hover_text(format!("選択期間を1日後へ移動 ({PRIMARY_KEY_LABEL}→)"))
+                .clicked()
+            {
+                self.move_selected_gantt_days(1);
             }
             if ui
                 .small_button("−")
@@ -50,9 +65,11 @@ impl FluxelApp {
                 });
         });
         ui.label(
-            RichText::new("クリックで選択・ダブルクリックで編集・バーを左右にドラッグして日付移動")
-                .small()
-                .color(theme::MUTED),
+            RichText::new(
+                "クリックで選択・ダブルクリックで編集・ドラッグまたは←1日 / 1日→で期間移動",
+            )
+            .small()
+            .color(theme::MUTED),
         );
         let zoom_delta = ui.input(|input| {
             if input.modifiers.command {
@@ -101,14 +118,17 @@ impl FluxelApp {
                 });
             return;
         }
-        let action = gantt_canvas(
-            ui,
-            &projects,
-            &terms,
-            self.gantt_day_width,
-            self.selected_gantt_project.as_deref(),
-            self.selected_gantt_term.as_deref(),
-        );
+        let canvas_state = GanttCanvasState {
+            selected_project: self.selected_gantt_project.as_deref(),
+            selected_term: self.selected_gantt_term.as_deref(),
+            scroll_to_today: self.gantt_scroll_to_today,
+            active_drag: self
+                .gantt_drag
+                .as_ref()
+                .map(|(id, days)| (id.as_str(), *days)),
+        };
+        let action = gantt_canvas(ui, &projects, &terms, self.gantt_day_width, canvas_state);
+        self.gantt_scroll_to_today = false;
         if let Some(selection) = action.selection {
             match selection {
                 GanttSelection::Project(id) => {
@@ -121,11 +141,23 @@ impl FluxelApp {
                 }
             }
         }
-        if let Some((term_id, days)) = action.moved_term {
-            match self.storage.move_gantt_term_days(&term_id, days) {
-                Ok(true) => self.refresh_gantt(),
-                Ok(false) => {}
-                Err(error) => self.set_error(error),
+        if let Some((term_id, days)) = action.dragging_term {
+            self.gantt_drag = Some((term_id, days));
+            ui.ctx().request_repaint();
+        }
+        if let Some(term_id) = action.finished_drag {
+            let days = self
+                .gantt_drag
+                .take()
+                .filter(|(dragged_id, _)| dragged_id == &term_id)
+                .map(|(_, days)| days)
+                .unwrap_or(0);
+            if days != 0 {
+                match self.storage.move_gantt_term_days(&term_id, days) {
+                    Ok(true) => self.refresh_gantt(),
+                    Ok(false) => {}
+                    Err(error) => self.set_error(error),
+                }
             }
         }
         if let Some(project) = action.edit_project {
@@ -260,6 +292,18 @@ impl FluxelApp {
                 self.selected_gantt_project = Some(target_id);
                 self.refresh_gantt();
             }
+            Ok(false) => {}
+            Err(error) => self.set_error(error),
+        }
+    }
+
+    /// Moves the selected term by an exact number of days and persists the change.
+    pub(super) fn move_selected_gantt_days(&mut self, days: i64) {
+        let Some(term_id) = self.selected_gantt_term.clone() else {
+            return;
+        };
+        match self.storage.move_gantt_term_days(&term_id, days) {
+            Ok(true) => self.refresh_gantt(),
             Ok(false) => {}
             Err(error) => self.set_error(error),
         }
@@ -464,7 +508,16 @@ struct GanttCanvasAction {
     selection: Option<GanttSelection>,
     edit_project: Option<GanttProject>,
     edit_term: Option<GanttTerm>,
-    moved_term: Option<(String, i64)>,
+    dragging_term: Option<(String, i64)>,
+    finished_drag: Option<String>,
+}
+
+/// Transient presentation state passed to the timeline renderer.
+struct GanttCanvasState<'a> {
+    selected_project: Option<&'a str>,
+    selected_term: Option<&'a str>,
+    scroll_to_today: bool,
+    active_drag: Option<(&'a str, i64)>,
 }
 
 fn gantt_canvas(
@@ -472,8 +525,7 @@ fn gantt_canvas(
     projects: &[GanttProject],
     terms: &[GanttTerm],
     day_width: f32,
-    selected_project: Option<&str>,
-    selected_term: Option<&str>,
+    state: GanttCanvasState<'_>,
 ) -> GanttCanvasAction {
     let mut action = GanttCanvasAction::default();
     let today = Local::now().date_naive();
@@ -494,6 +546,17 @@ fn gantt_canvas(
     let canvas_width = left_width + total_days * day_width;
     ScrollArea::both().id_salt("gantt-canvas").show(ui, |ui| {
         ui.set_min_width(canvas_width);
+        let (header, _) = ui.allocate_exact_size(Vec2::new(canvas_width, 32.0), Sense::hover());
+        paint_gantt_header(ui, header, min_date, max_date, day_width, left_width, today);
+        if state.scroll_to_today {
+            let today_x =
+                header.left() + left_width + (today - min_date).num_days() as f32 * day_width;
+            let marker = egui::Rect::from_center_size(
+                egui::pos2(today_x, header.center().y),
+                Vec2::new(2.0, header.height()),
+            );
+            ui.scroll_to_rect(marker, Some(Align::Center));
+        }
         let mut row = 0usize;
         for project in projects {
             let project_terms = terms
@@ -505,7 +568,9 @@ fn gantt_canvas(
             ui.painter().rect_filled(
                 rect,
                 0.0,
-                if selected_project == Some(project.id.as_str()) && selected_term.is_none() {
+                if state.selected_project == Some(project.id.as_str())
+                    && state.selected_term.is_none()
+                {
                     Color32::from_rgb(40, 68, 91)
                 } else if response.hovered() {
                     Color32::from_rgb(43, 49, 58)
@@ -513,9 +578,9 @@ fn gantt_canvas(
                     theme::PANEL_ALT
                 },
             );
-            ui.painter().text(
+            paint_elided_text(
+                ui,
                 rect.left_center() + Vec2::new(8.0, 0.0),
-                Align2::LEFT_CENTER,
                 format!(
                     "{}{}",
                     project.title,
@@ -523,6 +588,7 @@ fn gantt_canvas(
                 ),
                 FontId::proportional(13.0),
                 theme::TEXT,
+                left_width - 58.0,
             );
             ui.painter().text(
                 egui::pos2(rect.left() + left_width - 10.0, rect.center().y),
@@ -542,7 +608,7 @@ fn gantt_canvas(
             for term in project_terms {
                 let (rect, response) =
                     ui.allocate_exact_size(Vec2::new(canvas_width, 34.0), Sense::click_and_drag());
-                if selected_term == Some(term.id.as_str()) {
+                if state.selected_term == Some(term.id.as_str()) {
                     ui.painter()
                         .rect_filled(rect, 0.0, Color32::from_rgb(40, 68, 91));
                 } else if response.hovered() {
@@ -552,12 +618,13 @@ fn gantt_canvas(
                     ui.painter()
                         .rect_filled(rect, 0.0, Color32::from_rgb(25, 29, 34));
                 }
-                ui.painter().text(
+                paint_elided_text(
+                    ui,
                     rect.left_center() + Vec2::new(18.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    &term.title,
+                    term.title.clone(),
                     FontId::proportional(12.0),
                     theme::TEXT,
+                    left_width - 68.0,
                 );
                 ui.painter().text(
                     egui::pos2(rect.left() + left_width - 10.0, rect.center().y),
@@ -568,21 +635,29 @@ fn gantt_canvas(
                 );
                 let start = (term.start_date - min_date).num_days() as f32;
                 let days = (term.end_date - term.start_date).num_days().max(0) as f32 + 1.0;
-                let bar = egui::Rect::from_min_size(
+                let base_bar = egui::Rect::from_min_size(
                     egui::pos2(
                         rect.left() + left_width + start * day_width,
                         rect.top() + 7.0,
                     ),
                     Vec2::new((days * day_width).max(8.0), 20.0),
                 );
+                let preview_days = state
+                    .active_drag
+                    .filter(|(id, _)| *id == term.id)
+                    .map(|(_, days)| days)
+                    .unwrap_or(0);
+                let bar = base_bar.translate(Vec2::new(preview_days as f32 * day_width, 0.0));
                 ui.painter()
                     .rect_filled(bar, 4.0, theme::color_from_hex(&term.color));
-                ui.painter().text(
+                let label_width = (bar.width() - 12.0).max(1.0);
+                paint_elided_text(
+                    ui,
                     bar.left_center() + Vec2::new(6.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    &term.title,
+                    term.title.clone(),
                     FontId::proportional(10.0),
                     Color32::WHITE,
+                    label_width,
                 );
                 let today_x =
                     rect.left() + left_width + (today - min_date).num_days() as f32 * day_width;
@@ -593,7 +668,15 @@ fn gantt_canvas(
                     ],
                     Stroke::new(1.0, theme::ORANGE),
                 );
-                let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+                let over_bar = response
+                    .hover_pos()
+                    .is_some_and(|pointer| bar.contains(pointer));
+                let is_dragging = response.dragged();
+                let response = response.on_hover_cursor(if over_bar || is_dragging {
+                    egui::CursorIcon::ResizeHorizontal
+                } else {
+                    egui::CursorIcon::PointingHand
+                });
                 if response.clicked() {
                     action.selection = Some(GanttSelection::Term {
                         id: term.id.clone(),
@@ -603,21 +686,119 @@ fn gantt_canvas(
                 if response.double_clicked() {
                     action.edit_term = Some(term.clone());
                 }
-                if response.drag_stopped()
-                    && let Some(pointer) = response.interact_pointer_pos()
+                if response.dragged()
+                    && let (Some(pointer), Some(delta)) =
+                        (response.interact_pointer_pos(), response.total_drag_delta())
                 {
-                    let drag = response.drag_delta();
-                    let origin = pointer - drag;
-                    if bar.contains(origin) {
-                        let days = (drag.x / day_width).round() as i64;
-                        if days != 0 {
-                            action.moved_term = Some((term.id.clone(), days));
+                    let origin = pointer - delta;
+                    if base_bar.contains(origin) {
+                        action.dragging_term =
+                            Some((term.id.clone(), snapped_drag_days(delta.x, day_width)));
+                    }
+                }
+                if response.drag_stopped() {
+                    // Some native backends deliver a short drag as press/move/release in
+                    // one repaint. `Response::total_drag_delta` is then unavailable because
+                    // the button is already up, while the pointer state still retains it.
+                    if let (Some(pointer), Some(delta)) = (
+                        response.interact_pointer_pos(),
+                        ui.input(|input| input.pointer.total_drag_delta()),
+                    ) {
+                        let origin = pointer - delta;
+                        if base_bar.contains(origin) {
+                            action.dragging_term =
+                                Some((term.id.clone(), snapped_drag_days(delta.x, day_width)));
                         }
                     }
+                    action.finished_drag = Some(term.id.clone());
                 }
                 row += 1;
             }
         }
     });
     action
+}
+
+/// Converts a horizontal pointer movement into whole timeline days.
+fn snapped_drag_days(delta_x: f32, day_width: f32) -> i64 {
+    (delta_x / day_width).round() as i64
+}
+
+/// Draws the fixed label boundary and calendar ticks used to interpret term positions.
+fn paint_gantt_header(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    min_date: NaiveDate,
+    max_date: NaiveDate,
+    day_width: f32,
+    left_width: f32,
+    today: NaiveDate,
+) {
+    ui.painter().rect_filled(rect, 0.0, theme::PANEL);
+    ui.painter().text(
+        rect.left_center() + Vec2::new(8.0, 0.0),
+        Align2::LEFT_CENTER,
+        "PROJECT / TERM",
+        FontId::proportional(10.0),
+        theme::MUTED,
+    );
+    let interval = if day_width >= 28.0 {
+        1
+    } else if day_width >= 14.0 {
+        7
+    } else {
+        14
+    };
+    let total_days = (max_date - min_date).num_days();
+    for offset in 0..=total_days {
+        let date = min_date + Duration::days(offset);
+        if offset % interval != 0 && date != today {
+            continue;
+        }
+        let x = rect.left() + left_width + offset as f32 * day_width;
+        let color = if date == today {
+            theme::ORANGE
+        } else {
+            theme::BORDER
+        };
+        ui.painter().line_segment(
+            [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+            Stroke::new(1.0, color),
+        );
+        ui.painter().text(
+            egui::pos2(x + 4.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            if date == today {
+                format!("今日  {}/{}", date.month(), date.day())
+            } else {
+                format!("{}/{}", date.month(), date.day())
+            },
+            FontId::proportional(10.0),
+            if date == today {
+                theme::ORANGE
+            } else {
+                theme::MUTED
+            },
+        );
+    }
+    let divider_x = rect.left() + left_width;
+    ui.painter().line_segment(
+        [
+            egui::pos2(divider_x, rect.top()),
+            egui::pos2(divider_x, rect.bottom()),
+        ],
+        Stroke::new(1.0, theme::BORDER),
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::snapped_drag_days;
+
+    #[test]
+    fn drag_distance_snaps_to_nearest_day() {
+        assert_eq!(snapped_drag_days(35.0, 18.0), 2);
+        assert_eq!(snapped_drag_days(-26.0, 18.0), -1);
+        assert_eq!(snapped_drag_days(8.0, 18.0), 0);
+    }
 }

@@ -96,6 +96,8 @@ pub struct FluxelApp {
     gantt_terms: Vec<GanttTerm>,
     gantt_filter: Option<String>,
     gantt_day_width: f32,
+    gantt_scroll_to_today: bool,
+    gantt_drag: Option<(String, i64)>,
     gantt_editor: Option<GanttEditor>,
     selected_gantt_project: Option<String>,
     selected_gantt_term: Option<String>,
@@ -143,6 +145,8 @@ impl FluxelApp {
             gantt_terms: Vec::new(),
             gantt_filter: None,
             gantt_day_width: 18.0,
+            gantt_scroll_to_today: false,
+            gantt_drag: None,
             gantt_editor: None,
             selected_gantt_project: None,
             selected_gantt_term: None,
@@ -349,7 +353,11 @@ impl FluxelApp {
             }
         }
         if self.page == Page::Gantt && self.gantt_editor.is_none() && !self.search_open {
-            if primary && alt && ctx.input(|input| input.key_pressed(Key::ArrowUp)) {
+            if primary && !alt && ctx.input(|input| input.key_pressed(Key::ArrowLeft)) {
+                self.move_selected_gantt_days(-1);
+            } else if primary && !alt && ctx.input(|input| input.key_pressed(Key::ArrowRight)) {
+                self.move_selected_gantt_days(1);
+            } else if primary && alt && ctx.input(|input| input.key_pressed(Key::ArrowUp)) {
                 self.move_selected_gantt_to_project(-1);
             } else if primary && alt && ctx.input(|input| input.key_pressed(Key::ArrowDown)) {
                 self.move_selected_gantt_to_project(1);

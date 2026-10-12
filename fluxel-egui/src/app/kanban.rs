@@ -13,7 +13,7 @@ impl FluxelApp {
             }
             ui.label(
                 RichText::new(format!(
-                    "←/→ 列移動  ·  ↑/↓ カード選択  ·  {PRIMARY_KEY_LABEL}←/→ ステータス移動"
+                    "←/→ 列移動  ·  ↑/↓ 選択  ·  {PRIMARY_KEY_LABEL}←/→ 移動  ·  {PRIMARY_KEY_LABEL}↑/↓ 並べ替え"
                 ))
                 .small()
                 .color(theme::MUTED),
@@ -461,10 +461,12 @@ impl FluxelApp {
 }
 
 pub(super) fn task_card(ui: &mut egui::Ui, task: &Task, selected: bool) -> egui::Response {
-    let width = ui.available_width().max(240.0);
+    // Horizontal scroll areas report an effectively unbounded available width.
+    // Cap the card to its Kanban column so custom-painted text cannot span columns.
+    let width = ui.available_width().clamp(240.0, 260.0);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 76.0), Sense::click());
     if ui.is_rect_visible(rect) {
-        let painter = ui.painter();
+        let painter = ui.painter().with_clip_rect(rect);
         painter.rect(
             rect,
             5.0,
@@ -478,19 +480,21 @@ pub(super) fn task_card(ui: &mut egui::Ui, task: &Task, selected: bool) -> egui:
         );
         painter.rect_filled(color_rect, 1.0, theme::importance_color(&task.importance));
         let x = rect.min.x + 16.0;
-        painter.text(
+        let due = due_label(&task.end_date);
+        let due_color = due_color(&task.end_date);
+        let due_width = if due.is_empty() { 0.0 } else { 48.0 };
+        paint_elided_text(
+            ui,
             egui::pos2(x, rect.min.y + 22.0),
-            Align2::LEFT_CENTER,
             if task.name.is_empty() {
-                "(no name)"
+                "(no name)".to_owned()
             } else {
-                &task.name
+                task.name.clone()
             },
             FontId::proportional(14.0),
             theme::TEXT,
+            rect.max.x - x - due_width - 10.0,
         );
-        let due = due_label(&task.end_date);
-        let due_color = due_color(&task.end_date);
         painter.text(
             egui::pos2(rect.max.x - 8.0, rect.min.y + 22.0),
             Align2::RIGHT_CENTER,
@@ -498,12 +502,13 @@ pub(super) fn task_card(ui: &mut egui::Ui, task: &Task, selected: bool) -> egui:
             FontId::proportional(11.0),
             due_color,
         );
-        painter.text(
+        paint_elided_text(
+            ui,
             egui::pos2(x, rect.min.y + 51.0),
-            Align2::LEFT_CENTER,
-            preview(&task.description, 58),
+            strip_storage_markers(&task.description),
             FontId::proportional(11.0),
             theme::MUTED,
+            rect.max.x - x - 8.0,
         );
         if selected {
             painter.rect_filled(
