@@ -16,6 +16,13 @@ impl FluxelApp {
             if ui.button("Today").clicked() {
                 self.gantt_scroll_to_today = true;
             }
+            if ui
+                .button(format!("休暇日  {}", self.gantt_holidays.len()))
+                .on_hover_text("会社休日などの非稼働日を登録")
+                .clicked()
+            {
+                self.open_gantt_holiday_manager();
+            }
             let can_move_term = self.selected_gantt_term.is_some();
             if ui
                 .add_enabled(can_move_term, egui::Button::new("← 1日"))
@@ -127,7 +134,14 @@ impl FluxelApp {
                 .as_ref()
                 .map(|(id, days)| (id.as_str(), *days)),
         };
-        let action = gantt_canvas(ui, &projects, &terms, self.gantt_day_width, canvas_state);
+        let action = gantt_canvas(
+            ui,
+            &projects,
+            &terms,
+            &self.gantt_holidays,
+            self.gantt_day_width,
+            canvas_state,
+        );
         self.gantt_scroll_to_today = false;
         if let Some(selection) = action.selection {
             match selection {
@@ -520,10 +534,19 @@ struct GanttCanvasState<'a> {
     active_drag: Option<(&'a str, i64)>,
 }
 
+#[derive(Clone, Copy)]
+struct GanttScale {
+    min_date: NaiveDate,
+    max_date: NaiveDate,
+    day_width: f32,
+    left_width: f32,
+}
+
 fn gantt_canvas(
     ui: &mut egui::Ui,
     projects: &[GanttProject],
     terms: &[GanttTerm],
+    holidays: &[GanttHoliday],
     day_width: f32,
     state: GanttCanvasState<'_>,
 ) -> GanttCanvasAction {
@@ -544,10 +567,16 @@ fn gantt_canvas(
     let left_width = 220.0;
     let total_days = (max_date - min_date).num_days().max(1) as f32 + 1.0;
     let canvas_width = left_width + total_days * day_width;
+    let scale = GanttScale {
+        min_date,
+        max_date,
+        day_width,
+        left_width,
+    };
     ScrollArea::both().id_salt("gantt-canvas").show(ui, |ui| {
         ui.set_min_width(canvas_width);
         let (header, _) = ui.allocate_exact_size(Vec2::new(canvas_width, 32.0), Sense::hover());
-        paint_gantt_header(ui, header, min_date, max_date, day_width, left_width, today);
+        paint_gantt_header(ui, header, scale, today, holidays);
         if state.scroll_to_today {
             let today_x =
                 header.left() + left_width + (today - min_date).num_days() as f32 * day_width;
@@ -578,6 +607,7 @@ fn gantt_canvas(
                     theme::PANEL_ALT
                 },
             );
+            paint_holiday_columns(ui, rect, scale, holidays);
             paint_elided_text(
                 ui,
                 rect.left_center() + Vec2::new(8.0, 0.0),
@@ -618,6 +648,7 @@ fn gantt_canvas(
                     ui.painter()
                         .rect_filled(rect, 0.0, Color32::from_rgb(25, 29, 34));
                 }
+                paint_holiday_columns(ui, rect, scale, holidays);
                 paint_elided_text(
                     ui,
                     rect.left_center() + Vec2::new(18.0, 0.0),
@@ -728,13 +759,12 @@ fn snapped_drag_days(delta_x: f32, day_width: f32) -> i64 {
 fn paint_gantt_header(
     ui: &egui::Ui,
     rect: egui::Rect,
-    min_date: NaiveDate,
-    max_date: NaiveDate,
-    day_width: f32,
-    left_width: f32,
+    scale: GanttScale,
     today: NaiveDate,
+    holidays: &[GanttHoliday],
 ) {
     ui.painter().rect_filled(rect, 0.0, theme::PANEL);
+    paint_holiday_columns(ui, rect, scale, holidays);
     ui.painter().text(
         rect.left_center() + Vec2::new(8.0, 0.0),
         Align2::LEFT_CENTER,
@@ -742,22 +772,25 @@ fn paint_gantt_header(
         FontId::proportional(10.0),
         theme::MUTED,
     );
-    let interval = if day_width >= 28.0 {
+    let interval = if scale.day_width >= 28.0 {
         1
-    } else if day_width >= 14.0 {
+    } else if scale.day_width >= 14.0 {
         7
     } else {
         14
     };
-    let total_days = (max_date - min_date).num_days();
+    let total_days = (scale.max_date - scale.min_date).num_days();
     for offset in 0..=total_days {
-        let date = min_date + Duration::days(offset);
-        if offset % interval != 0 && date != today {
+        let date = scale.min_date + Duration::days(offset);
+        let holiday = holidays.iter().find(|holiday| holiday.date == date);
+        if offset % interval != 0 && date != today && holiday.is_none() {
             continue;
         }
-        let x = rect.left() + left_width + offset as f32 * day_width;
+        let x = rect.left() + scale.left_width + offset as f32 * scale.day_width;
         let color = if date == today {
             theme::ORANGE
+        } else if holiday.is_some() {
+            Color32::from_rgb(196, 139, 96)
         } else {
             theme::BORDER
         };
@@ -770,18 +803,26 @@ fn paint_gantt_header(
             Align2::LEFT_CENTER,
             if date == today {
                 format!("今日  {}/{}", date.month(), date.day())
+            } else if let Some(holiday) = holiday {
+                if scale.day_width >= 28.0 && !holiday.name.is_empty() {
+                    format!("{}/{}  {}", date.month(), date.day(), holiday.name)
+                } else {
+                    "休".to_owned()
+                }
             } else {
                 format!("{}/{}", date.month(), date.day())
             },
             FontId::proportional(10.0),
             if date == today {
                 theme::ORANGE
+            } else if holiday.is_some() {
+                Color32::from_rgb(214, 161, 119)
             } else {
                 theme::MUTED
             },
         );
     }
-    let divider_x = rect.left() + left_width;
+    let divider_x = rect.left() + scale.left_width;
     ui.painter().line_segment(
         [
             egui::pos2(divider_x, rect.top()),
@@ -789,6 +830,31 @@ fn paint_gantt_header(
         ],
         Stroke::new(1.0, theme::BORDER),
     );
+}
+
+/// Paints custom non-working days behind bars without obscuring row selection.
+fn paint_holiday_columns(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    scale: GanttScale,
+    holidays: &[GanttHoliday],
+) {
+    for holiday in holidays {
+        if holiday.date < scale.min_date || holiday.date > scale.max_date {
+            continue;
+        }
+        let offset = (holiday.date - scale.min_date).num_days() as f32;
+        let left = rect.left() + scale.left_width + offset * scale.day_width;
+        let holiday_rect = egui::Rect::from_min_max(
+            egui::pos2(left, rect.top()),
+            egui::pos2(left + scale.day_width, rect.bottom()),
+        );
+        ui.painter().rect_filled(
+            holiday_rect,
+            0.0,
+            Color32::from_rgba_unmultiplied(190, 120, 76, 36),
+        );
+    }
 }
 
 #[cfg(test)]

@@ -204,7 +204,7 @@ impl FluxelApp {
         }
         ui.add_space(8.0);
         settings_card(ui, "APPLICATION", |ui| {
-            ui.label("Fluxel egui 0.1.1");
+            ui.label("Fluxel egui 0.1.2");
             ui.label(RichText::new("既存SQLite形式と互換のRust/egui版").color(theme::MUTED));
         });
     }

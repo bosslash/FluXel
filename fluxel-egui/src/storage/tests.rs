@@ -256,3 +256,65 @@ fn gantt_move_operations_preserve_content_and_duration() {
     assert_eq!((moved.end_date - moved.start_date).num_days(), 2);
     assert_eq!(moved.start_date, date + Duration::days(4));
 }
+
+#[test]
+fn gantt_holidays_round_trip_update_and_delete() {
+    let (_temp, storage) = test_storage();
+    let date = NaiveDate::from_ymd_opt(2030, 5, 3).unwrap();
+    storage
+        .save_gantt_holiday(&GanttHoliday {
+            date,
+            name: "憲法記念日".to_owned(),
+        })
+        .unwrap();
+    storage
+        .save_gantt_holiday(&GanttHoliday {
+            date,
+            name: "休業日".to_owned(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        storage.gantt_holidays().unwrap(),
+        [GanttHoliday {
+            date,
+            name: "休業日".to_owned(),
+        }]
+    );
+    storage.delete_gantt_holiday(date).unwrap();
+    assert!(storage.gantt_holidays().unwrap().is_empty());
+}
+
+#[test]
+fn ten_thousand_tasks_remain_listable_and_searchable() {
+    let (_temp, storage) = test_storage();
+    let mut conn = Storage::connect(&storage.paths.tasks_db()).unwrap();
+    let tx = conn.transaction().unwrap();
+    {
+        let mut insert = tx
+            .prepare(
+                "INSERT INTO tasks
+                    (id,name,description,importance,created_at,update_at,end_date,status,stored_urls)
+                 VALUES (?1,?2,?3,'中','2030-01-01T00:00:00','2030-01-01T00:00:00',
+                         '2030-12-31','todo','')",
+            )
+            .unwrap();
+        for index in 0..10_000 {
+            insert
+                .execute(params![
+                    format!("load-{index:05}"),
+                    format!("負荷試験 {index:05}"),
+                    format!("検索用本文 {index:05}"),
+                ])
+                .unwrap();
+        }
+    }
+    tx.commit().unwrap();
+
+    assert_eq!(storage.list_tasks(30).unwrap().len(), 10_000);
+    let result = storage
+        .search_tasks("負荷試験 09999", false, "", "")
+        .unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].id, "load-09999");
+}

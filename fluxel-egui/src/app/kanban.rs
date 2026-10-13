@@ -21,28 +21,40 @@ impl FluxelApp {
         });
         ui.add_space(4.0);
 
+        // Group by reference once per frame. This avoids cloning every task's strings
+        // while still allowing each column to virtualize its visible rows.
+        let mut columns: [Vec<&Task>; 5] = std::array::from_fn(|_| Vec::new());
+        for task in &self.tasks {
+            if let Some(index) = STATUS_ORDER
+                .iter()
+                .position(|status| task.status.eq_ignore_ascii_case(status))
+            {
+                columns[index].push(task);
+            }
+        }
+        let selected_task = self.selected_task.clone();
+        let focused_status = self.focused_status.clone();
+        let scroll_to_selected = self.kanban_scroll_to_selected;
         let mut hovered: Option<String> = None;
         let mut clicked: Option<(String, bool)> = None;
+        let mut consumed_scroll_target = false;
         ScrollArea::horizontal()
             .id_salt("kanban-horizontal")
             .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
-                    for (status, label) in [
+                    for ((status, label), tasks) in [
                         ("todo", "ToDo"),
                         ("doing", "Doing"),
                         ("wait", "Wait"),
                         ("finish", "Finish"),
                         ("archive", "Archive"),
-                    ] {
-                        let tasks = self
-                            .tasks
-                            .iter()
-                            .filter(|task| task.status.eq_ignore_ascii_case(status))
-                            .cloned()
-                            .collect::<Vec<_>>();
+                    ]
+                    .into_iter()
+                    .zip(columns.iter())
+                    {
                         let empty_column_focused = tasks.is_empty()
-                            && self.selected_task.is_none()
-                            && self.focused_status.eq_ignore_ascii_case(status);
+                            && selected_task.is_none()
+                            && focused_status.eq_ignore_ascii_case(status);
                         ui.vertical(|ui| {
                             ui.set_width(272.0);
                             let header = egui::Frame::new()
@@ -72,31 +84,41 @@ impl FluxelApp {
                                 header.response.scroll_to_me(Some(Align::Center));
                             }
                             ui.separator();
-                            ScrollArea::vertical()
+                            let viewport_height = ui.available_height();
+                            let selected_index = selected_task
+                                .as_ref()
+                                .and_then(|id| tasks.iter().position(|task| &task.id == id));
+                            let should_scroll = scroll_to_selected && selected_index.is_some();
+                            let mut area = ScrollArea::vertical()
                                 .id_salt(format!("kanban-{status}"))
-                                .max_height(ui.available_height())
-                                .show(ui, |ui| {
-                                    for task in &tasks {
-                                        let selected =
-                                            self.selected_task.as_deref() == Some(task.id.as_str());
-                                        let response = task_card(ui, task, selected);
-                                        if selected {
-                                            response.scroll_to_me(None);
-                                        }
-                                        if response.hovered() {
-                                            hovered = Some(task.id.clone());
-                                        }
-                                        if response.clicked() {
-                                            clicked = Some((task.id.clone(), selected));
-                                        }
-                                        ui.add_space(4.0);
+                                .max_height(viewport_height);
+                            if let Some(index) = selected_index.filter(|_| should_scroll) {
+                                let offset = (index as f32 * 80.0 - viewport_height / 2.0).max(0.0);
+                                area = area.vertical_scroll_offset(offset);
+                                consumed_scroll_target = true;
+                            }
+                            area.show_rows(ui, 80.0, tasks.len(), |ui, rows| {
+                                for task in &tasks[rows] {
+                                    let selected =
+                                        selected_task.as_deref() == Some(task.id.as_str());
+                                    let response = task_card(ui, task, selected);
+                                    if response.hovered() {
+                                        hovered = Some(task.id.clone());
                                     }
-                                });
+                                    if response.clicked() {
+                                        clicked = Some((task.id.clone(), selected));
+                                    }
+                                    ui.add_space(4.0);
+                                }
+                            });
                         });
                         ui.add(egui::Separator::default().vertical().spacing(6.0));
                     }
                 });
             });
+        if consumed_scroll_target {
+            self.kanban_scroll_to_selected = false;
+        }
         if hovered != self.hovered_task {
             self.hovered_task = hovered.clone();
             if let Some(id) = hovered {
@@ -138,6 +160,7 @@ impl FluxelApp {
         };
         self.column_vertical_index = next;
         self.selected_task = Some(tasks[next].clone());
+        self.kanban_scroll_to_selected = true;
     }
 
     /// Reapplies the Python version's session-only ordering to freshly loaded rows.
@@ -199,6 +222,7 @@ impl FluxelApp {
             column_indices[target as usize],
         );
         self.column_vertical_index = target as usize;
+        self.kanban_scroll_to_selected = true;
         self.manual_column_orders.insert(
             status,
             column_indices
@@ -243,6 +267,7 @@ impl FluxelApp {
             .map(|task| task.id.clone());
         if let Some(id) = target {
             self.select_task(&id);
+            self.kanban_scroll_to_selected = true;
         } else {
             self.selected_task = None;
         }
@@ -283,7 +308,10 @@ impl FluxelApp {
             .storage
             .set_task_status(&id, STATUS_ORDER[next as usize])
         {
-            Ok(()) => self.refresh_tasks(),
+            Ok(()) => {
+                self.kanban_scroll_to_selected = true;
+                self.refresh_tasks();
+            }
             Err(error) => self.set_error(error),
         }
     }

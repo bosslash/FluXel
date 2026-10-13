@@ -16,7 +16,11 @@ impl Storage {
                 end_date TEXT,
                 status TEXT NOT NULL,
                 stored_urls TEXT
-            );",
+            );
+            CREATE INDEX IF NOT EXISTS idx_tasks_status_update
+                ON tasks(status,update_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_tasks_end_date
+                ON tasks(end_date);",
         )?;
         ensure_column(&conn, "tasks", "importance", "TEXT")?;
         ensure_column(&conn, "tasks", "stored_urls", "TEXT")?;

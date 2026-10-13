@@ -15,8 +15,8 @@ pub use tasks::{normalize_description, strip_storage_markers};
 
 use crate::{
     models::{
-        DashboardSnapshot, GanttProject, GanttTerm, QuickAccessItem, QuickAccessKind, Task,
-        normalized_importance,
+        DashboardSnapshot, GanttHoliday, GanttProject, GanttTerm, QuickAccessItem, QuickAccessKind,
+        Task, normalized_importance,
     },
     paths::AppPaths,
 };

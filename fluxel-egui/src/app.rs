@@ -12,6 +12,7 @@ use global_hotkey::{
 
 mod dashboard;
 mod gantt;
+mod gantt_holidays;
 mod kanban;
 mod quick_access;
 mod search;
@@ -23,8 +24,8 @@ use widgets::*;
 
 use fluxel_egui::{
     models::{
-        DashboardSnapshot, GanttProject, GanttTerm, Page, QuickAccessItem, QuickAccessKind,
-        STATUS_ORDER, Task,
+        DashboardSnapshot, GanttHoliday, GanttProject, GanttTerm, Page, QuickAccessItem,
+        QuickAccessKind, STATUS_ORDER, Task,
     },
     settings::AppSettings,
     storage::{Storage, strip_storage_markers},
@@ -72,6 +73,7 @@ pub struct FluxelApp {
     selected_task: Option<String>,
     focused_status: String,
     column_vertical_index: usize,
+    kanban_scroll_to_selected: bool,
     hovered_task: Option<String>,
     manual_column_orders: HashMap<String, Vec<String>>,
     task_editor: Option<TaskEditor>,
@@ -94,11 +96,16 @@ pub struct FluxelApp {
     dashboard: DashboardSnapshot,
     gantt_projects: Vec<GanttProject>,
     gantt_terms: Vec<GanttTerm>,
+    gantt_holidays: Vec<GanttHoliday>,
     gantt_filter: Option<String>,
     gantt_day_width: f32,
     gantt_scroll_to_today: bool,
     gantt_drag: Option<(String, i64)>,
     gantt_editor: Option<GanttEditor>,
+    gantt_holiday_manager_open: bool,
+    gantt_holiday_date: NaiveDate,
+    gantt_holiday_name: String,
+    gantt_holiday_delete_armed: Option<NaiveDate>,
     selected_gantt_project: Option<String>,
     selected_gantt_term: Option<String>,
     pending_focus: Option<FocusTarget>,
@@ -121,6 +128,7 @@ impl FluxelApp {
             selected_task: None,
             focused_status: String::new(),
             column_vertical_index: 0,
+            kanban_scroll_to_selected: false,
             hovered_task: None,
             manual_column_orders: HashMap::new(),
             task_editor: None,
@@ -143,11 +151,16 @@ impl FluxelApp {
             dashboard: DashboardSnapshot::default(),
             gantt_projects: Vec::new(),
             gantt_terms: Vec::new(),
+            gantt_holidays: Vec::new(),
             gantt_filter: None,
             gantt_day_width: 18.0,
             gantt_scroll_to_today: false,
             gantt_drag: None,
             gantt_editor: None,
+            gantt_holiday_manager_open: false,
+            gantt_holiday_date: Local::now().date_naive(),
+            gantt_holiday_name: String::new(),
+            gantt_holiday_delete_armed: None,
             selected_gantt_project: None,
             selected_gantt_term: None,
             pending_focus: None,
@@ -224,10 +237,12 @@ impl FluxelApp {
         match (
             self.storage.gantt_projects(true),
             self.storage.gantt_terms(),
+            self.storage.gantt_holidays(),
         ) {
-            (Ok(projects), Ok(terms)) => {
+            (Ok(projects), Ok(terms), Ok(holidays)) => {
                 self.gantt_projects = projects;
                 self.gantt_terms = terms;
+                self.gantt_holidays = holidays;
                 if self
                     .gantt_filter
                     .as_ref()
@@ -262,7 +277,7 @@ impl FluxelApp {
                     }
                 }
             }
-            (Err(error), _) | (_, Err(error)) => self.set_error(error),
+            (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => self.set_error(error),
         }
     }
 
@@ -523,6 +538,7 @@ impl eframe::App for FluxelApp {
         self.task_editor_window(&ctx);
         self.quick_editor_window(&ctx);
         self.gantt_editor_window(&ctx);
+        self.gantt_holiday_manager_window(&ctx);
         self.search_window(&ctx);
         self.toast_ui(&ctx);
     }

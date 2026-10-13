@@ -82,6 +82,13 @@ pub struct GanttTerm {
     pub sort_order: i64,
 }
 
+/// A user-defined non-working day displayed on the Gantt timeline.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GanttHoliday {
+    pub date: NaiveDate,
+    pub name: String,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DashboardSnapshot {
     pub importance_counts: [usize; 4],

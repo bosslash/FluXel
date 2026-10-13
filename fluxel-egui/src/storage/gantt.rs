@@ -19,7 +19,11 @@ impl Storage {
                 FOREIGN KEY (project_id) REFERENCES gantt_projects(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_gantt_terms_project
-                ON gantt_terms(project_id,sort_order,start_date);",
+                ON gantt_terms(project_id,sort_order,start_date);
+            CREATE TABLE IF NOT EXISTS gantt_holidays (
+                date TEXT PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT ''
+            );",
         )?;
         ensure_column(
             &conn,
@@ -88,6 +92,39 @@ impl Storage {
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Returns custom non-working days in calendar order.
+    pub fn gantt_holidays(&self) -> Result<Vec<GanttHoliday>> {
+        let conn = Self::connect(&self.paths.planning_db())?;
+        let mut stmt = conn.prepare("SELECT date,name FROM gantt_holidays ORDER BY date")?;
+        Ok(stmt
+            .query_map([], |row| {
+                let date: String = row.get(0)?;
+                Ok(GanttHoliday {
+                    date: parse_date(&date),
+                    name: row.get(1)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Creates or renames a custom non-working day.
+    pub fn save_gantt_holiday(&self, holiday: &GanttHoliday) -> Result<()> {
+        Self::connect(&self.paths.planning_db())?.execute(
+            "INSERT INTO gantt_holidays(date,name) VALUES (?1,?2)
+             ON CONFLICT(date) DO UPDATE SET name=excluded.name",
+            params![holiday.date.to_string(), holiday.name.trim()],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_gantt_holiday(&self, date: NaiveDate) -> Result<()> {
+        Self::connect(&self.paths.planning_db())?.execute(
+            "DELETE FROM gantt_holidays WHERE date=?1",
+            [date.to_string()],
+        )?;
+        Ok(())
     }
 
     pub fn save_gantt_project(&self, project: &mut GanttProject) -> Result<()> {
