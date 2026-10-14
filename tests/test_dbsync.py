@@ -4,13 +4,19 @@ import os
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
 from fluxel.core.dbsync import inspect_sync_target, sync_folder
+from fluxel.core.dbsync.types import content_hash
 from fluxel.core.fluxel_db import TASK_DB, ensure_tasks_table
-from fluxel.core.gantt_db import ensure_gantt_tables
+from fluxel.core.gantt_db import (
+    delete_holiday,
+    ensure_gantt_tables,
+    list_holidays,
+    save_holiday,
+)
 from fluxel.core.quick_access_db import ensure_quick_access_tables
 from fluxel.paths import app_state_dir
 
@@ -107,6 +113,64 @@ class FolderDbSyncTest(unittest.TestCase):
         self.assertEqual(report.downloaded, 1)
         self.assertEqual(report.uploaded, 1)
         self.assertEqual(self._task_names(), ["Local", "Remote"])
+
+    def test_gantt_holiday_add_update_and_delete_are_synchronized(self) -> None:
+        holiday_date = date(2026, 12, 29)
+        self._activate_device("holiday-device-a")
+        save_holiday(holiday_date, "年末休暇")
+        uploaded = sync_folder(self.target)
+        self.assertEqual(uploaded.uploaded, 1)
+
+        self._activate_device("holiday-device-b")
+        downloaded = sync_folder(self.target)
+        self.assertEqual(downloaded.downloaded, 1)
+        self.assertEqual(
+            [(holiday.date, holiday.name) for holiday in list_holidays()],
+            [(holiday_date, "年末休暇")],
+        )
+
+        save_holiday(holiday_date, "会社休業日")
+        self.assertEqual(sync_folder(self.target).uploaded, 1)
+        self._activate_device("holiday-device-a")
+        self.assertEqual(sync_folder(self.target).downloaded, 1)
+        self.assertEqual(list_holidays()[0].name, "会社休業日")
+
+        delete_holiday(holiday_date)
+        deleted = sync_folder(self.target)
+        self.assertEqual(deleted.deleted, 1)
+        self._activate_device("holiday-device-b")
+        sync_folder(self.target)
+        self.assertEqual(list_holidays(), [])
+
+    def test_holiday_payload_hash_matches_egui(self) -> None:
+        self.assertEqual(
+            content_hash({"date": "2026-12-29", "name": "年末休暇"}),
+            "d5554a45c6f8b73bb6367d5759dfd9927384a21b0a25a94dd0fc200033891fa0",
+        )
+
+    def test_gantt_holiday_conflict_preserves_the_local_edit(self) -> None:
+        holiday_date = date(2027, 1, 4)
+        self._activate_device("conflict-device-a")
+        save_holiday(holiday_date, "共通休暇")
+        sync_folder(self.target)
+
+        self._activate_device("conflict-device-b")
+        sync_folder(self.target)
+        save_holiday(holiday_date, "端末Bの休暇")
+
+        self._activate_device("conflict-device-a")
+        save_holiday(holiday_date, "端末Aの休暇")
+        sync_folder(self.target)
+
+        self._activate_device("conflict-device-b")
+        conflicted = sync_folder(self.target)
+        self.assertEqual(conflicted.conflicts, 1)
+        self.assertEqual(conflicted.uploaded, 1)
+        self.assertEqual(list_holidays()[0].name, "端末Bの休暇")
+
+        self._activate_device("conflict-device-a")
+        self.assertEqual(sync_folder(self.target).downloaded, 1)
+        self.assertEqual(list_holidays()[0].name, "端末Bの休暇")
 
 
 if __name__ == "__main__":

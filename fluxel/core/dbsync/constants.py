@@ -12,4 +12,5 @@ SUPPORTED_KINDS = (
     "tag",
     "gantt_project",
     "gantt_term",
+    "gantt_holiday",
 )

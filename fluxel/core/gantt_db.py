@@ -32,6 +32,12 @@ class GanttTerm:
     sort_order: int
 
 
+@dataclass(frozen=True, slots=True)
+class GanttHoliday:
+    date: date
+    name: str
+
+
 def gantt_db_path() -> Path:
     return local_app_data_dir() / "Planning.db"
 
@@ -74,6 +80,10 @@ def ensure_gantt_tables(db_path: Path | None = None) -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_gantt_terms_project
                 ON gantt_terms(project_id, sort_order, start_date);
+            CREATE TABLE IF NOT EXISTS gantt_holidays (
+                date TEXT PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT ''
+            );
             """
         )
         project_columns = _column_names(conn, "gantt_projects")
@@ -156,6 +166,59 @@ def list_terms(db_path: Path | None = None) -> list[GanttTerm]:
         )
         for row in rows
     ]
+
+
+def list_holidays(db_path: Path | None = None) -> list[GanttHoliday]:
+    """登録済みの休暇日を日付順で返す。"""
+    path = db_path or gantt_db_path()
+    ensure_gantt_tables(path)
+    conn = sqlite3.connect(path)
+    try:
+        rows = conn.execute(
+            "SELECT date, name FROM gantt_holidays ORDER BY date"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        GanttHoliday(date=date.fromisoformat(str(row[0])), name=str(row[1] or ""))
+        for row in rows
+    ]
+
+
+def save_holiday(
+    holiday_date: date,
+    name: str,
+    db_path: Path | None = None,
+) -> None:
+    """休暇日を追加し、同じ日付がある場合は名称を更新する。"""
+    path = db_path or gantt_db_path()
+    ensure_gantt_tables(path)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO gantt_holidays(date, name) VALUES (?, ?)
+            ON CONFLICT(date) DO UPDATE SET name=excluded.name
+            """,
+            (holiday_date.isoformat(), name.strip()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_holiday(holiday_date: date, db_path: Path | None = None) -> None:
+    """指定した休暇日を削除する。"""
+    path = db_path or gantt_db_path()
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "DELETE FROM gantt_holidays WHERE date=?",
+            (holiday_date.isoformat(),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def add_project(

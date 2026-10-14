@@ -44,6 +44,7 @@ class LocalSyncRepository:
             "tag": self._upsert_tag,
             "gantt_project": self._upsert_gantt_project,
             "gantt_term": self._upsert_gantt_term,
+            "gantt_holiday": self._upsert_gantt_holiday,
         }
         handlers[event.kind](event.data)
 
@@ -99,7 +100,13 @@ class LocalSyncRepository:
                 SyncItem("gantt_term", str(row["id"]), dict(row))
                 for row in connection.execute("SELECT * FROM gantt_terms ORDER BY id").fetchall()
             ]
-            return projects + terms
+            holidays = [
+                SyncItem("gantt_holiday", str(row["date"]), dict(row))
+                for row in connection.execute(
+                    "SELECT date, name FROM gantt_holidays ORDER BY date"
+                ).fetchall()
+            ]
+            return projects + terms + holidays
         finally:
             connection.close()
 
@@ -237,6 +244,21 @@ class LocalSyncRepository:
         finally:
             connection.close()
 
+    def _upsert_gantt_holiday(self, data: dict[str, Any]) -> None:
+        """Apply a holiday event using its ISO date as the stable identity."""
+        connection = sqlite3.connect(gantt_db_path())
+        try:
+            connection.execute(
+                """
+                INSERT INTO gantt_holidays(date, name) VALUES (?, ?)
+                ON CONFLICT(date) DO UPDATE SET name=excluded.name
+                """,
+                (str(data["date"]), str(data.get("name", ""))),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
     def _delete(self, kind: str, entity_id: str) -> None:
         if kind == "task":
             self._execute_delete(Path(TASK_DB), "DELETE FROM tasks WHERE id=?", entity_id)
@@ -266,6 +288,12 @@ class LocalSyncRepository:
             self._execute_delete(gantt_db_path(), "DELETE FROM gantt_projects WHERE id=?", entity_id, foreign_keys=True)
         elif kind == "gantt_term":
             self._execute_delete(gantt_db_path(), "DELETE FROM gantt_terms WHERE id=?", entity_id)
+        elif kind == "gantt_holiday":
+            self._execute_delete(
+                gantt_db_path(),
+                "DELETE FROM gantt_holidays WHERE date=?",
+                entity_id,
+            )
 
     @staticmethod
     def _execute_delete(path: Path, sql: str, entity_id: str, *, foreign_keys: bool = False) -> None:

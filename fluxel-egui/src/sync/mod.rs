@@ -172,7 +172,13 @@ pub fn synchronize(storage: &Storage, folder: &Path) -> Result<SyncReport> {
 mod tests {
     use super::*;
     use crate::paths::AppPaths;
-    use crate::{models::Task, storage::Storage};
+    use crate::{
+        models::{GanttHoliday, Task},
+        storage::Storage,
+    };
+    use chrono::NaiveDate;
+
+    static TEST_SYNC_LOCK: Mutex<()> = Mutex::new(());
 
     fn storage_at(path: &Path) -> Storage {
         Storage::new(AppPaths {
@@ -185,6 +191,7 @@ mod tests {
 
     #[test]
     fn two_devices_exchange_python_compatible_events() {
+        let _guard = TEST_SYNC_LOCK.lock().unwrap();
         let temp = tempfile::tempdir().unwrap();
         let first = storage_at(&temp.path().join("first"));
         let second = storage_at(&temp.path().join("second"));
@@ -205,6 +212,41 @@ mod tests {
     }
 
     #[test]
+    fn two_devices_exchange_gantt_holiday_updates_and_deletes() {
+        let _guard = TEST_SYNC_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let first = storage_at(&temp.path().join("first"));
+        let second = storage_at(&temp.path().join("second"));
+        let folder = temp.path().join("OneDrive").join("Fluxel Sync");
+        let date = NaiveDate::from_ymd_opt(2026, 12, 29).unwrap();
+
+        first
+            .save_gantt_holiday(&GanttHoliday {
+                date,
+                name: "年末休暇".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(synchronize(&first, &folder).unwrap().uploaded, 1);
+        assert_eq!(synchronize(&second, &folder).unwrap().downloaded, 1);
+        assert_eq!(second.gantt_holidays().unwrap()[0].name, "年末休暇");
+
+        second
+            .save_gantt_holiday(&GanttHoliday {
+                date,
+                name: "会社休業日".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(synchronize(&second, &folder).unwrap().uploaded, 1);
+        assert_eq!(synchronize(&first, &folder).unwrap().downloaded, 1);
+        assert_eq!(first.gantt_holidays().unwrap()[0].name, "会社休業日");
+
+        first.delete_gantt_holiday(date).unwrap();
+        assert_eq!(synchronize(&first, &folder).unwrap().deleted, 1);
+        assert_eq!(synchronize(&second, &folder).unwrap().deleted, 1);
+        assert!(second.gantt_holidays().unwrap().is_empty());
+    }
+
+    #[test]
     fn canonical_hash_matches_python_json_encoding() {
         let data = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
             serde_json::json!({"b": "日本語", "a": 1}),
@@ -213,6 +255,14 @@ mod tests {
         assert_eq!(
             types::content_hash(Some(&data)).unwrap(),
             "08dd526e9a85dca3ad495c77919e506717f76b036c0952b68d391e42c30ba05b"
+        );
+        let holiday = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+            serde_json::json!({"date": "2026-12-29", "name": "年末休暇"}),
+        )
+        .unwrap();
+        assert_eq!(
+            types::content_hash(Some(&holiday)).unwrap(),
+            "d5554a45c6f8b73bb6367d5759dfd9927384a21b0a25a94dd0fc200033891fa0"
         );
     }
 }

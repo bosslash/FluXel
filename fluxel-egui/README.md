@@ -23,7 +23,7 @@ Windowsでは既存版と同じ`%LOCALAPPDATA%\Fluxel`を利用します。`loca
 - ShortCut / OpenFile（タグ検索、保存文字列のコピー、ファイル実行）
 - Gantt（プロジェクト・期間の編集、選択、並べ替え、プロジェクト移動、バーの日付移動、拡大縮小、任意休暇日の保存・表示）
 - タスク検索、設定保存、`settings.ini` / `Tasks.db`のエクスポート
-- OneDriveフォルダー同期（Python版と同じ`.fluxel-sync/v1`、競合記録対応）
+- OneDriveフォルダー同期（Python版と同じ`.fluxel-sync/v1`、休暇日・競合記録対応）
 - アプリ内ショートカットと、macOS / Windows共通のグローバルホットキー
 
 Kanbanは表示中の行だけを描画するため、数千〜1万件規模のデータでも全カードを毎フレーム生成しません。10,000件の保存・一覧・検索は自動回帰試験の対象です。

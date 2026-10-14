@@ -5,13 +5,14 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 pub const FORMAT_VERSION: u8 = 1;
-pub const SUPPORTED_KINDS: [&str; 6] = [
+pub const SUPPORTED_KINDS: [&str; 7] = [
     "task",
     "shortcut",
     "openfile",
     "tag",
     "gantt_project",
     "gantt_term",
+    "gantt_holiday",
 ];
 
 #[derive(Clone, Debug)]

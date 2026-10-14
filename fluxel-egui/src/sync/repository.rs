@@ -48,6 +48,7 @@ impl<'a> LocalRepository<'a> {
             "tag" => self.upsert_tag(data),
             "gantt_project" => self.upsert_project(data),
             "gantt_term" => self.upsert_term(data),
+            "gantt_holiday" => self.upsert_holiday(data),
             other => bail!("unsupported sync item type: {other}"),
         }
     }
@@ -204,6 +205,18 @@ impl<'a> LocalRepository<'a> {
                 data,
             });
         }
+        let mut holidays =
+            connection.prepare("SELECT date,name FROM gantt_holidays ORDER BY date")?;
+        for row in holidays.query_map([], |row| {
+            object(row, &[("date", 0, false), ("name", 1, false)])
+        })? {
+            let data = row?;
+            result.push(SyncItem {
+                kind: "gantt_holiday".to_owned(),
+                entity_id: string(&data, "date"),
+                data,
+            });
+        }
         Ok(result)
     }
 
@@ -305,6 +318,15 @@ impl<'a> LocalRepository<'a> {
         Ok(())
     }
 
+    fn upsert_holiday(&self, data: &Map<String, Value>) -> Result<()> {
+        Connection::open(self.storage.paths.planning_db())?.execute(
+            "INSERT INTO gantt_holidays(date,name) VALUES (?1,?2)
+             ON CONFLICT(date) DO UPDATE SET name=excluded.name",
+            params![string(data, "date"), string(data, "name")],
+        )?;
+        Ok(())
+    }
+
     fn delete(&self, kind: &str, id: &str) -> Result<()> {
         let paths: &AppPaths = &self.storage.paths;
         match kind {
@@ -339,6 +361,10 @@ impl<'a> LocalRepository<'a> {
                     "gantt_terms"
                 };
                 connection.execute(&format!("DELETE FROM {table} WHERE id=?1"), [id])?;
+            }
+            "gantt_holiday" => {
+                Connection::open(paths.planning_db())?
+                    .execute("DELETE FROM gantt_holidays WHERE date=?1", [id])?;
             }
             other => bail!("unsupported sync item type: {other}"),
         }
